@@ -3,6 +3,8 @@
 Онлайн-аналог «Codenames: Pictures» для браузера. Полностью статический сайт —
 разворачивается на GitHub Pages без сборки, бэкенда и ключей от сервисов.
 
+**Играть: https://xpesh01.github.io/codenames-pictures/**
+
 ## Как играть
 
 1. Один игрок жмёт **Создать комнату** и отправляет остальным ссылку (кнопка «Скопировать ссылку»).
@@ -43,16 +45,14 @@ WebRTC через [PeerJS](https://peerjs.com/) — публичный брок�
 
 ## Деплой на GitHub Pages
 
-```bash
-git remote add origin git@github.com:<ваш-аккаунт>/<репозиторий>.git
-git push -u origin main
-```
+Сайт публикуется прямо из ветки: **Settings → Pages → Deploy from a branch → main / (root)**.
+Сборки нет, поэтому каждый пуш в `main` сам обновляет страницу через минуту-другую.
+Файл `.nojekyll` уже в репозитории, так что Jekyll ничего не трогает.
 
-Затем в настройках репозитория: **Settings → Pages → Source → GitHub Actions**.
-Workflow `.github/workflows/pages.yml` опубликует сайт при каждом пуше в `main`.
-
-Альтернатива без Actions: **Settings → Pages → Deploy from a branch → main / (root)**.
-Файл `.nojekyll` уже в репозитории, так что Jekyll ничего не тронет.
+Если хочется деплой через GitHub Actions, добавьте стандартный workflow с
+`actions/upload-pages-artifact` (`path: .`) и переключите источник на **GitHub Actions**.
+Для пуша файлов в `.github/workflows/` токену нужен scope `workflow`:
+`gh auth refresh -s workflow`.
 
 ## Локальный запуск
 
