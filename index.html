@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Кодовые имена · Картинки</title>
+<meta name="description" content="Онлайн-игра «Кодовые имена» с картинками. Создайте комнату и играйте с друзьями прямо в браузере.">
+<meta name="theme-color" content="#131a2b">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕵️</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ───────────────── Главный экран ───────────────── -->
+<section id="screen-home" class="screen screen--home">
+  <div class="home-card">
+    <h1 class="logo">Кодовые&nbsp;имена<span>картинки</span></h1>
+    <p class="tagline">Два капитана, одна сетка странных картинок и ни одного шанса объясниться нормально.</p>
+
+    <label class="field">
+      <span>Ваше имя</span>
+      <input id="input-name" type="text" maxlength="20" placeholder="Агент" autocomplete="nickname">
+    </label>
+
+    <label class="field">
+      <span>Размер поля</span>
+      <select id="input-mode">
+        <option value="pictures">5×4 — 20 картинок (классические «Картинки»)</option>
+        <option value="big">5×5 — 25 картинок (длиннее партия)</option>
+      </select>
+    </label>
+
+    <div class="home-actions">
+      <button id="btn-create" class="btn btn--primary">Создать комнату</button>
+      <div class="join-row">
+        <input id="input-code" type="text" maxlength="5" placeholder="КОД" autocomplete="off" spellcheck="false">
+        <button id="btn-join" class="btn">Войти</button>
+      </div>
+      <button id="btn-local" class="btn btn--ghost">Играть на одном экране</button>
+    </div>
+
+    <p id="home-error" class="home-error" hidden></p>
+    <p class="home-hint">
+      Комнаты работают напрямую между браузерами (P2P), без сервера.
+      Хост должен держать вкладку открытой, пока идёт партия.
+    </p>
+  </div>
+</section>
+
+<!-- ───────────────── Экран игры ───────────────── -->
+<section id="screen-game" class="screen screen--game" hidden>
+  <header class="topbar">
+    <button id="btn-home" class="icon-btn" title="Выйти в меню">←</button>
+    <div class="room">
+      <span class="room__label">Комната</span>
+      <strong id="room-code">—</strong>
+    </div>
+    <button id="btn-invite" class="btn btn--small">Скопировать ссылку</button>
+    <div class="spacer"></div>
+    <span id="status" class="status"></span>
+    <button id="btn-new" class="btn btn--small btn--ghost">Новая игра</button>
+  </header>
+
+  <div class="scorebar">
+    <div class="score score--red"><span id="score-red">0</span></div>
+    <div id="turn-banner" class="turn-banner">—</div>
+    <div class="score score--blue"><span id="score-blue">0</span></div>
+  </div>
+
+  <main class="layout">
+    <div class="board-wrap">
+      <div id="board" class="board"></div>
+      <div id="clue-strip" class="clue-strip" hidden></div>
+    </div>
+
+    <aside class="panel">
+      <div class="panel__block">
+        <h2>Ваше место</h2>
+        <div id="seat-online" class="seat">
+          <div class="seat__row" data-group="team">
+            <button class="chip chip--red" data-team="red">Красные</button>
+            <button class="chip chip--blue" data-team="blue">Синие</button>
+            <button class="chip" data-team="none">Зритель</button>
+          </div>
+          <div class="seat__row" data-group="role">
+            <button class="chip" data-role="operative">Оперативник</button>
+            <button class="chip" data-role="spymaster">Капитан</button>
+          </div>
+        </div>
+        <div id="seat-local" class="seat" hidden>
+          <label class="switch">
+            <input id="toggle-key" type="checkbox">
+            <span>Показать ключ капитана</span>
+          </label>
+          <p class="muted small">Передавайте устройство: ключ видно только когда переключатель включён.</p>
+        </div>
+      </div>
+
+      <div class="panel__block">
+        <h2>Подсказка</h2>
+        <form id="clue-form" class="clue-form" hidden>
+          <input id="clue-word" type="text" maxlength="40" placeholder="Слово" autocomplete="off">
+          <input id="clue-count" type="number" min="0" max="9" value="1" inputmode="numeric">
+          <button class="btn btn--primary" type="submit">Дать</button>
+        </form>
+        <p id="clue-info" class="clue-info">Ждём ход.</p>
+        <button id="btn-endturn" class="btn btn--wide" hidden>Завершить ход</button>
+      </div>
+
+      <div class="panel__block">
+        <h2>Игроки</h2>
+        <ul id="players" class="players"></ul>
+      </div>
+
+      <div class="panel__block panel__block--grow">
+        <h2>Журнал</h2>
+        <ol id="log" class="log"></ol>
+      </div>
+    </aside>
+  </main>
+
+  <div id="result" class="result" hidden>
+    <div class="result__card">
+      <h2 id="result-title">—</h2>
+      <p id="result-sub" class="muted"></p>
+      <div class="result__actions">
+        <button id="btn-new-2" class="btn btn--primary">Новая игра</button>
+        <button id="btn-close-result" class="btn btn--ghost">Посмотреть поле</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
