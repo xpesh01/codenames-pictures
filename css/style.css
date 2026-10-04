@@ -139,7 +139,15 @@ input:focus, select:focus { outline: 2px solid #3a567f; outline-offset: 1px; }
 
 /* ───────── шапка игры ───────── */
 
-.screen--game { display: flex; flex-direction: column; min-height: 100vh; }
+/* Экран игры занимает ровно высоту окна: поле подгоняется под свободное
+   место скриптом, страница целиком не скроллится никогда. */
+.screen--game {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
 
 .topbar {
   display: flex;
@@ -196,21 +204,38 @@ input:focus, select:focus { outline: 2px solid #3a567f; outline-offset: 1px; }
 
 .layout {
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
   gap: 16px;
-  padding: 0 14px 18px;
-  align-items: start;
+  padding: 0 14px 14px;
 }
-.board-wrap { min-width: 0; }
+
+.board-wrap {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+.board-area {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
 
 /* ───────── поле ───────── */
 
 .board {
   --cols: var(--cols-base, 5);
+  --gap: 10px;
   display: grid;
   grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--gap);
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .card {
@@ -327,8 +352,7 @@ input:focus, select:focus { outline: 2px solid #3a567f; outline-offset: 1px; }
 .card.is-revealed.key-assassin .art { filter: grayscale(1) brightness(.25); }
 
 .clue-strip {
-  margin-top: 12px;
-  padding: 12px 16px;
+  padding: 10px 16px;
   border-radius: 12px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -353,8 +377,9 @@ input:focus, select:focus { outline: 2px solid #3a567f; outline-offset: 1px; }
   display: flex;
   flex-direction: column;
   gap: 12px;
-  position: sticky;
-  top: 70px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .panel__block {
   background: var(--panel);
@@ -453,10 +478,35 @@ input:focus, select:focus { outline: 2px solid #3a567f; outline-offset: 1px; }
 
 /* ───────── адаптив ───────── */
 
-@media (max-width: 920px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  .panel { position: static; }
-  .panel__block--grow .log { max-height: 150px; }
+/* Панель уезжает под поле только в портретной ориентации: в альбомной
+   высоты и так мало, там выгоднее оставить её сбоку. */
+@media (max-width: 920px) and (orientation: portrait) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .panel { max-height: 40vh; max-height: 40dvh; }
+  .panel__block--grow { flex: 0 0 auto; }
+  .panel__block--grow .log { max-height: 120px; }
+}
+
+@media (orientation: portrait) and (max-height: 700px) {
+  .panel { max-height: 32vh; max-height: 32dvh; }
+}
+
+@media (max-width: 920px) and (orientation: landscape) {
+  .layout { grid-template-columns: minmax(0, 1fr) 230px; }
+}
+
+/* Низкие экраны: ужимаем всё, что не поле. */
+@media (max-height: 500px) {
+  .topbar { padding: 4px 10px; }
+  .scorebar { padding: 4px 10px; }
+  .score { font-size: 17px; }
+  .turn-banner { font-size: 12px; padding: 4px 8px; }
+  .panel__block { padding: 8px 10px; }
+  .panel__block--grow { display: none; }
 }
 
 @media (max-width: 620px) {
@@ -464,13 +514,16 @@ input:focus, select:focus { outline: 2px solid #3a567f; outline-offset: 1px; }
 }
 
 @media (max-width: 560px) {
-  .board { gap: 6px; }
+  .board { --gap: 6px; }
   .card { border-radius: 10px; }
-  .topbar { padding: 8px 10px; gap: 7px; }
+  /* Шапка в одну строку — каждый лишний ряд съедает высоту поля. */
+  .topbar { padding: 6px 10px; gap: 7px; flex-wrap: nowrap; }
+  .topbar .status, .room__label { display: none; }
   .room strong { font-size: 16px; }
-  .layout { padding: 0 8px 16px; gap: 12px; }
-  .scorebar { grid-template-columns: 56px 1fr 56px; padding: 8px 10px; }
-  .score { font-size: 21px; }
+  .layout { padding: 0 8px 10px; gap: 10px; }
+  .scorebar { grid-template-columns: 50px 1fr 50px; padding: 6px 10px; gap: 8px; }
+  .score { font-size: 20px; }
+  .turn-banner { font-size: 13px; padding: 6px 8px; }
   .home-card { padding: 22px 18px; }
   .logo { font-size: 28px; }
 }

@@ -30,6 +30,7 @@ const el = {
   turn: $('#turn-banner'),
 
   board: $('#board'),
+  boardArea: $('#board-area'),
   clueStrip: $('#clue-strip'),
 
   seatOnline: $('#seat-online'),
@@ -245,7 +246,49 @@ function render() {
   renderPlayers();
   renderLog(view);
   renderResult(view);
+  fitBoard();
 }
+
+const CARD_RATIO = 5 / 4;
+
+/**
+ * Подгоняет ширину поля так, чтобы оно целиком влезало в свободную область:
+ * карточки держат пропорцию 5:4, поэтому ограничением становится либо ширина,
+ * либо высота — берём меньшее. Благодаря этому страница никогда не скроллится.
+ */
+function fitBoard() {
+  const view = room.view;
+  if (!view || el.game.hidden) return;
+
+  const styles = getComputedStyle(el.board);
+  const cols = parseInt(styles.getPropertyValue('--cols'), 10) || view.cols;
+  const gap = parseFloat(styles.columnGap) || 0;
+  const rows = Math.ceil(view.cards.length / cols);
+
+  const availW = el.boardArea.clientWidth;
+  const availH = el.boardArea.clientHeight;
+  if (!availW || !availH) return;
+
+  const byWidth = (availW - (cols - 1) * gap) / cols;
+  const byHeight = ((availH - (rows - 1) * gap) / rows) * CARD_RATIO;
+  const cardW = Math.max(36, Math.min(byWidth, byHeight));
+
+  el.board.style.width = `${Math.floor(cardW * cols + (cols - 1) * gap)}px`;
+}
+
+let fitScheduled = false;
+const scheduleFit = () => {
+  if (fitScheduled) return;
+  fitScheduled = true;
+  requestAnimationFrame(() => {
+    fitScheduled = false;
+    fitBoard();
+  });
+};
+
+new ResizeObserver(scheduleFit).observe(el.boardArea);
+window.addEventListener('resize', scheduleFit);
+window.addEventListener('orientationchange', scheduleFit);
 
 function renderBoard(view) {
   const signature = `${view.seed}:${view.cols}`;
