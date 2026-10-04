@@ -41,6 +41,7 @@ const el = {
   clueInfo: $('#clue-info'),
   endTurn: $('#btn-endturn'),
   players: $('#players'),
+  playersBlock: $('#block-players'),
   log: $('#log'),
 
   result: $('#result'),
@@ -50,8 +51,12 @@ const el = {
   toast: $('#toast')
 };
 
-const TEAM_RU = { red: 'Красные', blue: 'Синие' };
-const TEAM_ONE = { red: 'красных', blue: 'синих' };
+// Падежи команд: «красные ходят», «ход красных», «переходит к красным».
+const TEAM = {
+  red: { nom: 'красные', gen: 'красных', dat: 'красным' },
+  blue: { nom: 'синие', gen: 'синих', dat: 'синим' }
+};
+const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
 let boardSignature = null;
 let cardEls = [];
@@ -138,6 +143,7 @@ function showGame() {
   const online = room.mode !== 'local';
   el.seatOnline.hidden = !online;
   el.seatLocal.hidden = online;
+  el.playersBlock.hidden = !online;
 }
 
 el.back.addEventListener('click', () => {
@@ -245,7 +251,9 @@ function renderBoard(view) {
   const signature = `${view.seed}:${view.cols}`;
   if (signature !== boardSignature) {
     boardSignature = signature;
-    el.board.style.setProperty('--cols', view.cols);
+    el.board.style.setProperty('--cols-base', view.cols);
+    // поле 5×4 на телефоне разворачиваем в 4×5 — карточки получаются вдвое крупнее
+    el.board.classList.toggle('board--rotatable', view.cards.length === 20);
     el.board.innerHTML = '';
     cardEls = view.cards.map((card, i) => {
       const btn = document.createElement('button');
@@ -280,7 +288,7 @@ function renderBoard(view) {
     if (card.revealed) {
       btn.classList.add('is-revealed');
       btn.querySelector('.veil').textContent =
-        card.key === 'assassin' ? '💀' : card.key === 'neutral' ? '🫥' : '🕵️';
+        card.key === 'assassin' ? '💀' : card.key === 'neutral' ? '🧍' : '🕵️';
     } else {
       btn.querySelector('.veil').textContent = '';
       if (guessing) btn.classList.add('is-clickable');
@@ -299,14 +307,14 @@ function renderScore(view) {
   el.turn.className = 'turn-banner';
   if (view.phase === 'over') {
     el.turn.classList.add('is-over');
-    el.turn.textContent = `Победа: ${TEAM_RU[view.winner]}`;
+    el.turn.textContent = `Победа ${TEAM[view.winner].gen}`;
     return;
   }
   el.turn.classList.add(view.turn === 'red' ? 'is-red' : 'is-blue');
   el.turn.textContent =
     view.phase === 'clue'
-      ? `Ход ${TEAM_ONE[view.turn]}: капитан думает`
-      : `Ход ${TEAM_ONE[view.turn]}: угадывают`;
+      ? `Ход ${TEAM[view.turn].gen}: капитан думает`
+      : `Ход ${TEAM[view.turn].gen}: угадывают`;
 }
 
 function renderClue(view) {
@@ -328,11 +336,11 @@ function renderClue(view) {
   } else if (showForm) {
     el.clueInfo.textContent = 'Введите слово и количество карточек.';
   } else if (view.phase === 'clue') {
-    el.clueInfo.textContent = `Капитан ${TEAM_ONE[view.turn]} придумывает подсказку…`;
+    el.clueInfo.textContent = `Капитан ${TEAM[view.turn].gen} придумывает подсказку…`;
   } else if (canGuess(view)) {
     el.clueInfo.textContent = 'Выбирайте карточки на поле.';
   } else {
-    el.clueInfo.textContent = `Угадывают ${TEAM_RU[view.turn].toLowerCase()}.`;
+    el.clueInfo.textContent = `Угадывают ${TEAM[view.turn].nom}.`;
   }
 
   el.endTurn.hidden = !canGuess(view);
@@ -384,24 +392,24 @@ function renderLog(view) {
 function logText(e) {
   switch (e.kind) {
     case 'start':
-      return `Начинают ${TEAM_ONE[e.team]}.`;
+      return `Начинают ${TEAM[e.team].nom}.`;
     case 'clue':
-      return `${TEAM_RU[e.team]}: подсказка «${e.word}» — ${e.count || '∞'}.`;
+      return `${cap(TEAM[e.team].nom)}: подсказка «${e.word}» — ${e.count || '∞'}.`;
     case 'reveal': {
       const what =
         e.key === 'assassin'
           ? 'убийцу'
           : e.key === 'neutral'
           ? 'нейтральную карточку'
-          : `агента ${TEAM_ONE[e.key]}`;
-      return `${TEAM_RU[e.team]} открыли ${what}.`;
+          : `агента ${TEAM[e.key].gen}`;
+      return `${cap(TEAM[e.team].nom)} открыли ${what}.`;
     }
     case 'turn':
-      return `Ход переходит к ${TEAM_ONE[e.team]}.`;
+      return `Ход переходит к ${TEAM[e.team].dat}.`;
     case 'end':
       return e.endedBy === 'assassin'
-        ? `Убийца! Победа ${TEAM_ONE[e.team]}.`
-        : `Все агенты найдены. Победа ${TEAM_ONE[e.team]}.`;
+        ? `Убийца! Победа ${TEAM[e.team].gen}.`
+        : `Все агенты найдены. Победа ${TEAM[e.team].gen}.`;
     default:
       return '';
   }
@@ -415,7 +423,7 @@ function renderResult(view) {
   }
   if (resultShownFor === view.seed) return;
   resultShownFor = view.seed;
-  el.resultTitle.textContent = `Победа: ${TEAM_RU[view.winner]}`;
+  el.resultTitle.textContent = `Победа ${TEAM[view.winner].gen}!`;
   el.resultTitle.className = view.winner === 'red' ? 'is-red' : 'is-blue';
   el.resultSub.textContent =
     view.endedBy === 'assassin'
