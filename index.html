@@ -30,6 +30,22 @@
       </select>
     </label>
 
+    <div class="field">
+      <span>Таймер</span>
+      <label class="switch">
+        <input id="home-timer-on" type="checkbox">
+        <span>Ограничить время хода</span>
+      </label>
+      <div id="home-timer-fields" class="timer-fields" hidden>
+        <label>Капитан, сек
+          <input id="home-timer-clue" type="number" min="10" max="300" value="60" inputmode="numeric">
+        </label>
+        <label>Угадывание, сек
+          <input id="home-timer-guess" type="number" min="10" max="300" value="90" inputmode="numeric">
+        </label>
+      </div>
+    </div>
+
     <div class="home-actions">
       <button id="btn-create" class="btn btn--primary">Создать комнату</button>
       <div class="join-row">
@@ -63,7 +79,10 @@
 
   <div class="scorebar">
     <div class="score score--red"><span id="score-red">0</span></div>
-    <div id="turn-banner" class="turn-banner">—</div>
+    <div id="turn-banner" class="turn-banner">
+      <span id="turn-text">—</span>
+      <span id="timer" class="timer" hidden>0:00</span>
+    </div>
     <div class="score score--blue"><span id="score-blue">0</span></div>
   </div>
 
@@ -107,6 +126,25 @@
         </form>
         <p id="clue-info" class="clue-info">Ждём ход.</p>
         <button id="btn-endturn" class="btn btn--wide" hidden>Завершить ход</button>
+      </div>
+
+      <div class="panel__block">
+        <h2>Таймер</h2>
+        <div id="timer-settings" class="timer-settings">
+          <label class="switch">
+            <input id="game-timer-on" type="checkbox">
+            <span>Включить</span>
+          </label>
+          <div class="timer-fields">
+            <label>Капитан, сек
+              <input id="game-timer-clue" type="number" min="10" max="300" value="60" inputmode="numeric">
+            </label>
+            <label>Угадывание, сек
+              <input id="game-timer-guess" type="number" min="10" max="300" value="90" inputmode="numeric">
+            </label>
+          </div>
+          <p id="timer-hint" class="muted small">Настройки меняет создатель комнаты.</p>
+        </div>
       </div>
 
       <div id="block-players" class="panel__block">

@@ -12,6 +12,35 @@ export const UNLIMITED = 99;
 export const TEAMS = ['red', 'blue'];
 export const other = (team) => (team === 'red' ? 'blue' : 'red');
 
+const TOKEN_COLORS = ['#ffd166', '#06d6a0', '#ef476f', '#4cc9f0', '#f78c6b', '#c77dff', '#80ed99', '#ffadad'];
+
+export function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n));
+}
+
+export function normalizeSettings(raw = {}) {
+  return {
+    timerOn: !!raw.timerOn,
+    clueSec: clamp(Math.round(Number(raw.clueSec) || 60), 10, 300),
+    guessSec: clamp(Math.round(Number(raw.guessSec) || 90), 10, 300)
+  };
+}
+
+/** Цвет личной метки игрока — одинаковый у всех клиентов. */
+export function playerColor(id) {
+  let h = 2166136261 >>> 0;
+  for (const c of String(id)) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return TOKEN_COLORS[h % TOKEN_COLORS.length];
+}
+
+export function playerInitial(name) {
+  const chars = [...String(name || '?').trim()];
+  return (chars[0] || '?').toUpperCase();
+}
+
 export function createGame(seed, modeId = 'pictures') {
   const mode = MODES[modeId] || MODES.pictures;
   const rnd = makeRng(seed);
@@ -44,6 +73,8 @@ export function createGame(seed, modeId = 'pictures') {
       pic: pictures[i],
       revealedBy: null
     })),
+    marks: {},
+    timer: { endsAt: null, duration: 0, startedAt: null },
     log: [{ kind: 'start', team: starting, at: Date.now() }],
     version: 1
   };
@@ -75,6 +106,7 @@ export function revealCard(state, team, index) {
 
   card.revealed = true;
   card.revealedBy = team;
+  clearMarksOn(state, index);
   state.log.push({ kind: 'reveal', team, index, key: card.key, at: Date.now() });
 
   if (card.key === 'assassin') {
@@ -112,6 +144,7 @@ function passTurn(state) {
   state.phase = 'clue';
   state.clue = null;
   state.guessesLeft = 0;
+  state.marks = {};
   state.log.push({ kind: 'turn', team: state.turn, at: Date.now() });
 }
 
@@ -119,8 +152,35 @@ function finish(state, winner, endedBy) {
   state.phase = 'over';
   state.winner = winner;
   state.endedBy = endedBy;
+  state.marks = {};
+  state.timer = { endsAt: null, duration: 0, startedAt: null };
   state.log.push({ kind: 'end', team: winner, endedBy, at: Date.now() });
   state.version++;
+}
+
+/** Первый клик: поставить или перенести метку. Повтор по той же карточке — сигнал «открыть». */
+export function setMark(state, playerId, index) {
+  if (state.phase !== 'guess') return null;
+  const card = state.cards[index];
+  if (!card || card.revealed) return null;
+  if (state.marks[playerId] === index) return 'ready';
+  state.marks[playerId] = index;
+  state.version++;
+  return 'tagged';
+}
+
+export function clearMarksOn(state, index) {
+  for (const id of Object.keys(state.marks)) {
+    if (state.marks[id] === index) delete state.marks[id];
+  }
+}
+
+export function expireTurn(state) {
+  if (state.phase !== 'clue' && state.phase !== 'guess') return false;
+  state.log.push({ kind: 'timeout', team: state.turn, at: Date.now() });
+  passTurn(state);
+  state.version++;
+  return true;
 }
 
 /**

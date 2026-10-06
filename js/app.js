@@ -3,7 +3,7 @@
 
 import { Room } from './room.js';
 import { renderPicture } from './pictures.js';
-import { MODES, UNLIMITED } from './game.js';
+import { MODES, UNLIMITED, normalizeSettings, playerInitial } from './game.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -28,6 +28,8 @@ const el = {
   scoreRed: $('#score-red'),
   scoreBlue: $('#score-blue'),
   turn: $('#turn-banner'),
+  turnText: $('#turn-text'),
+  timer: $('#timer'),
 
   board: $('#board'),
   boardArea: $('#board-area'),
@@ -44,6 +46,15 @@ const el = {
   players: $('#players'),
   playersBlock: $('#block-players'),
   log: $('#log'),
+
+  homeTimerOn: $('#home-timer-on'),
+  homeTimerFields: $('#home-timer-fields'),
+  homeTimerClue: $('#home-timer-clue'),
+  homeTimerGuess: $('#home-timer-guess'),
+  gameTimerOn: $('#game-timer-on'),
+  gameTimerClue: $('#game-timer-clue'),
+  gameTimerGuess: $('#game-timer-guess'),
+  timerHint: $('#timer-hint'),
 
   result: $('#result'),
   resultTitle: $('#result-title'),
@@ -72,6 +83,20 @@ const room = new Room({
 /* ───────── меню ───────── */
 
 el.name.value = localStorage.getItem('cnpix:name') || '';
+try {
+  const savedTimer = JSON.parse(localStorage.getItem('cnpix:timer') || 'null');
+  if (savedTimer) {
+    el.homeTimerOn.checked = !!savedTimer.timerOn;
+    el.homeTimerClue.value = savedTimer.clueSec || 60;
+    el.homeTimerGuess.value = savedTimer.guessSec || 90;
+  }
+} catch (_) {
+  /* битые настройки — оставляем значения по умолчанию */
+}
+el.homeTimerFields.hidden = !el.homeTimerOn.checked;
+el.homeTimerOn.addEventListener('change', () => {
+  el.homeTimerFields.hidden = !el.homeTimerOn.checked;
+});
 const hashCode = location.hash.replace(/^#\/?/, '').trim().toUpperCase();
 if (/^[A-Z0-9]{5}$/.test(hashCode)) {
   el.code.value = hashCode;
@@ -82,6 +107,18 @@ const profile = () => ({ name: el.name.value.trim() || 'Агент', team: null,
 
 function rememberName() {
   localStorage.setItem('cnpix:name', el.name.value.trim());
+}
+
+function readTimerSettings(onEl, clueEl, guessEl) {
+  return normalizeSettings({
+    timerOn: onEl.checked,
+    clueSec: clueEl.value,
+    guessSec: guessEl.value
+  });
+}
+
+function rememberTimer() {
+  localStorage.setItem('cnpix:timer', JSON.stringify(readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess)));
 }
 
 function homeError(msg) {
@@ -107,7 +144,12 @@ async function withBusy(btn, fn) {
 el.create.addEventListener('click', () =>
   withBusy(el.create, async () => {
     rememberName();
-    const code = await room.createOnline(profile(), el.mode.value);
+    rememberTimer();
+    const code = await room.createOnline(
+      profile(),
+      el.mode.value,
+      readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess)
+    );
     location.hash = code;
     showGame();
     el.status.textContent = 'Комната открыта — ждём игроков';
@@ -131,7 +173,12 @@ el.code.addEventListener('keydown', (e) => {
 
 el.local.addEventListener('click', () => {
   rememberName();
-  room.startLocal(profile(), el.mode.value);
+  rememberTimer();
+  room.startLocal(
+    profile(),
+    el.mode.value,
+    readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess)
+  );
   showGame();
   el.status.textContent = 'Игра на одном устройстве';
 });
@@ -145,11 +192,13 @@ function showGame() {
   el.seatOnline.hidden = !online;
   el.seatLocal.hidden = online;
   el.playersBlock.hidden = !online;
+  startTimerTick();
 }
 
 el.back.addEventListener('click', () => {
   if (room.mode !== 'local' && !confirm('Выйти из комнаты?')) return;
   room.leave();
+  stopTimerTick();
   location.hash = '';
   boardSignature = null;
   el.game.hidden = true;
@@ -246,6 +295,7 @@ function render() {
   renderPlayers();
   renderLog(view);
   renderResult(view);
+  renderTimerSettings(view);
   fitBoard();
 }
 
@@ -309,11 +359,13 @@ function renderBoard(view) {
       dot.className = 'hint-dot';
       const veil = document.createElement('span');
       veil.className = 'veil';
-      btn.append(dot, veil);
+      const marks = document.createElement('div');
+      marks.className = 'marks';
+      btn.append(dot, veil, marks);
 
       btn.addEventListener('click', () => {
         if (!btn.classList.contains('is-clickable')) return;
-        room.dispatch({ t: 'reveal', index: i });
+        room.dispatch({ t: 'pick', index: i });
       });
       el.board.append(btn);
       return btn;
@@ -321,6 +373,7 @@ function renderBoard(view) {
   }
 
   const guessing = canGuess(view);
+  const marks = view.marks || [];
   view.cards.forEach((card, i) => {
     const btn = cardEls[i];
     if (!btn) return;
@@ -336,9 +389,28 @@ function renderBoard(view) {
       btn.querySelector('.veil').textContent = '';
       if (guessing) btn.classList.add('is-clickable');
     }
+
+    const mine = marks.find((m) => m.index === i && m.id === room.me.id);
+    if (mine && guessing && !card.revealed) btn.classList.add('is-armed');
+
+    const box = btn.querySelector('.marks');
+    box.replaceChildren();
+    for (const m of marks.filter((x) => x.index === i)) {
+      const s = document.createElement('span');
+      s.className = 'mark' + (m.id === room.me.id ? ' is-me' : '');
+      s.style.background = m.color;
+      s.textContent = m.initial;
+      s.title = m.name;
+      box.append(s);
+    }
+
     btn.setAttribute(
       'aria-label',
-      card.revealed ? `Карточка ${i + 1}, открыта` : `Карточка ${i + 1}`
+      card.revealed
+        ? `Карточка ${i + 1}, открыта`
+        : mine
+        ? `Карточка ${i + 1}, ваша метка — второй клик откроет`
+        : `Карточка ${i + 1}`
     );
   });
 }
@@ -350,14 +422,16 @@ function renderScore(view) {
   el.turn.className = 'turn-banner';
   if (view.phase === 'over') {
     el.turn.classList.add('is-over');
-    el.turn.textContent = `Победа ${TEAM[view.winner].gen}`;
+    el.turnText.textContent = `Победа ${TEAM[view.winner].gen}`;
+    paintTimer(view);
     return;
   }
   el.turn.classList.add(view.turn === 'red' ? 'is-red' : 'is-blue');
-  el.turn.textContent =
+  el.turnText.textContent =
     view.phase === 'clue'
       ? `Ход ${TEAM[view.turn].gen}: капитан думает`
       : `Ход ${TEAM[view.turn].gen}: угадывают`;
+  paintTimer(view);
 }
 
 function renderClue(view) {
@@ -381,7 +455,7 @@ function renderClue(view) {
   } else if (view.phase === 'clue') {
     el.clueInfo.textContent = `Капитан ${TEAM[view.turn].gen} придумывает подсказку…`;
   } else if (canGuess(view)) {
-    el.clueInfo.textContent = 'Выбирайте карточки на поле.';
+    el.clueInfo.textContent = 'Первый клик — метка, второй по той же карточке — открыть.';
   } else {
     el.clueInfo.textContent = `Угадывают ${TEAM[view.turn].nom}.`;
   }
@@ -408,15 +482,17 @@ function renderPlayers() {
   if (!room.players.length) return;
   for (const p of room.players) {
     const li = document.createElement('li');
-    const tag = document.createElement('span');
-    tag.className = 'tag' + (p.team ? ` tag--${p.team}` : '');
+    const tint = document.createElement('span');
+    tint.className = 'tint';
+    tint.style.background = p.color || '#8d99b5';
+    tint.textContent = playerInitial(p.name);
     const name = document.createElement('span');
     name.textContent = p.name;
     if (p.id === room.me.id) name.className = 'me';
     const role = document.createElement('span');
     role.className = 'role';
     role.textContent = p.team ? (p.role === 'spymaster' ? 'капитан' : 'оперативник') : 'зритель';
-    li.append(tag, name, role);
+    li.append(tint, name, role);
     el.players.append(li);
   }
 }
@@ -449,6 +525,8 @@ function logText(e) {
     }
     case 'turn':
       return `Ход переходит к ${TEAM[e.team].dat}.`;
+    case 'timeout':
+      return `Время ${TEAM[e.team].gen} вышло.`;
     case 'end':
       return e.endedBy === 'assassin'
         ? `Убийца! Победа ${TEAM[e.team].gen}.`
@@ -478,6 +556,65 @@ function renderResult(view) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+let clockOffset = 0;
+let timerTick = null;
+
+function paintTimer(view) {
+  if (view.serverNow) clockOffset = view.serverNow - Date.now();
+  const on = !!(view.settings && view.settings.timerOn) && view.phase !== 'over' && view.timer && view.timer.endsAt;
+  el.timer.hidden = !on;
+  if (!on) {
+    el.timer.classList.remove('is-low');
+    return;
+  }
+  const left = Math.max(0, view.timer.endsAt - (Date.now() + clockOffset));
+  const sec = Math.ceil(left / 1000);
+  const m = Math.floor(sec / 60);
+  const s = String(sec % 60).padStart(2, '0');
+  el.timer.textContent = `${m}:${s}`;
+  el.timer.classList.toggle('is-low', sec <= 10);
+}
+
+function startTimerTick() {
+  if (timerTick) return;
+  timerTick = setInterval(() => {
+    if (room.view) paintTimer(room.view);
+  }, 250);
+}
+
+function stopTimerTick() {
+  clearInterval(timerTick);
+  timerTick = null;
+}
+
+function canEditSettings() {
+  return room.mode === 'local' || room.mode === 'host';
+}
+
+function renderTimerSettings(view) {
+  const s = view.settings || room.settings;
+  const writable = canEditSettings();
+  if (document.activeElement !== el.gameTimerOn) el.gameTimerOn.checked = !!s.timerOn;
+  if (document.activeElement !== el.gameTimerClue) el.gameTimerClue.value = s.clueSec;
+  if (document.activeElement !== el.gameTimerGuess) el.gameTimerGuess.value = s.guessSec;
+  el.gameTimerOn.disabled = !writable;
+  el.gameTimerClue.disabled = !writable || !s.timerOn;
+  el.gameTimerGuess.disabled = !writable || !s.timerOn;
+  el.timerHint.hidden = writable;
+}
+
+function sendTimerSettings() {
+  if (!canEditSettings()) return;
+  room.dispatch({
+    t: 'settings',
+    ...readTimerSettings(el.gameTimerOn, el.gameTimerClue, el.gameTimerGuess)
+  });
+}
+
+el.gameTimerOn.addEventListener('change', sendTimerSettings);
+el.gameTimerClue.addEventListener('change', sendTimerSettings);
+el.gameTimerGuess.addEventListener('change', sendTimerSettings);
 
 // Подсказка по размерам поля в меню собирается из правил, чтобы не дублировать цифры.
 for (const opt of el.mode.options) {
