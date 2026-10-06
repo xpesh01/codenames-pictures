@@ -299,7 +299,7 @@ function render() {
   fitBoard();
 }
 
-const CARD_RATIO = 5 / 4;
+const CARD_RATIO = 5 / 3;
 
 /**
  * Подгоняет ширину поля так, чтобы оно целиком влезало в свободную область:
