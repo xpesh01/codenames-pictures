@@ -2,8 +2,9 @@
 // здесь только отрисовка и отправка действий.
 
 import { Room } from './room.js';
-import { renderPicture } from './pictures.js';
-import { MODES, UNLIMITED, normalizeSettings, playerInitial } from './game.js';
+import { renderFace } from './cardface.js';
+import { MODES, UNLIMITED, FIRST_CLUE_BONUS_SEC, normalizeSettings, playerInitial } from './game.js';
+import { PACK_LIST, getPack } from './packs.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -12,6 +13,8 @@ const el = {
   game: $('#screen-game'),
   name: $('#input-name'),
   mode: $('#input-mode'),
+  pack: $('#input-pack'),
+  packNoteHome: $('#pack-note-home'),
   code: $('#input-code'),
   create: $('#btn-create'),
   join: $('#btn-join'),
@@ -30,6 +33,9 @@ const el = {
   turn: $('#turn-banner'),
   turnText: $('#turn-text'),
   timer: $('#timer'),
+  lobbyBar: $('#lobby-bar'),
+  lobbyText: $('#lobby-text'),
+  begin: $('#btn-begin'),
 
   board: $('#board'),
   boardArea: $('#board-area'),
@@ -42,15 +48,30 @@ const el = {
   clueWord: $('#clue-word'),
   clueCount: $('#clue-count'),
   clueInfo: $('#clue-info'),
+  clueHistory: $('#clue-history'),
+  clueHistoryEmpty: $('#clue-history-empty'),
   endTurn: $('#btn-endturn'),
+  gamePack: $('#game-pack'),
+  packNote: $('#pack-note'),
+  newGameDialog: $('#new-game-dialog'),
+  newGamePack: $('#new-game-pack'),
+  newGamePackNote: $('#new-game-pack-note'),
+  newGameConfirm: $('#btn-new-confirm'),
+  newGameCancel: $('#btn-new-cancel'),
   players: $('#players'),
   playersBlock: $('#block-players'),
+  botPanel: $('#block-bot'),
+  botNote: $('#bot-note'),
+  botList: $('#bot-list'),
+  addBot: $('#btn-add-bot'),
   log: $('#log'),
 
   homeTimerOn: $('#home-timer-on'),
   homeTimerFields: $('#home-timer-fields'),
   homeTimerClue: $('#home-timer-clue'),
   homeTimerGuess: $('#home-timer-guess'),
+  homeBotClue: $('#home-bot-clue'),
+  homeBotGuess: $('#home-bot-guess'),
   gameTimerOn: $('#game-timer-on'),
   gameTimerClue: $('#game-timer-clue'),
   gameTimerGuess: $('#game-timer-guess'),
@@ -87,8 +108,10 @@ try {
   const savedTimer = JSON.parse(localStorage.getItem('cnpix:timer') || 'null');
   if (savedTimer) {
     el.homeTimerOn.checked = !!savedTimer.timerOn;
-    el.homeTimerClue.value = savedTimer.clueSec || 60;
-    el.homeTimerGuess.value = savedTimer.guessSec || 90;
+    el.homeTimerClue.value = secondsToMinutes(savedTimer.clueMin != null ? savedTimer.clueMin * 60 : savedTimer.clueSec, 3);
+    el.homeTimerGuess.value = secondsToMinutes(savedTimer.guessMin != null ? savedTimer.guessMin * 60 : savedTimer.guessSec, 1.5);
+    if (savedTimer.botClueSec != null) el.homeBotClue.value = savedTimer.botClueSec;
+    if (savedTimer.botGuessSec != null) el.homeBotGuess.value = savedTimer.botGuessSec;
   }
 } catch (_) {
   /* битые настройки — оставляем значения по умолчанию */
@@ -109,16 +132,48 @@ function rememberName() {
   localStorage.setItem('cnpix:name', el.name.value.trim());
 }
 
+function secondsToMinutes(sec, fallback) {
+  const n = Number(sec);
+  if (!n) return fallback;
+  const min = Math.round((n / 60) * 10) / 10;
+  return Math.min(10, Math.max(0.5, min));
+}
+
 function readTimerSettings(onEl, clueEl, guessEl) {
-  return normalizeSettings({
+  return {
     timerOn: onEl.checked,
-    clueSec: clueEl.value,
-    guessSec: guessEl.value
+    clueMin: clueEl.value,
+    guessMin: guessEl.value
+  };
+}
+
+function readHomeSettings() {
+  return normalizeSettings({
+    ...readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess),
+    botClueSec: el.homeBotClue.value,
+    botGuessSec: el.homeBotGuess.value
   });
 }
 
 function rememberTimer() {
-  localStorage.setItem('cnpix:timer', JSON.stringify(readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess)));
+  localStorage.setItem('cnpix:timer', JSON.stringify(readHomeSettings()));
+}
+
+function rememberPack() {
+  localStorage.setItem('cnpix:pack', el.pack.value);
+}
+
+let adultPackOk = false;
+function confirmAdult(packId) {
+  const pack = getPack(packId);
+  if (!pack.adult || adultPackOk) return true;
+  adultPackOk = confirm('Колода «Слова 18+» только для взрослых. Продолжить?');
+  return adultPackOk;
+}
+
+function paintPackNote(node, pack) {
+  node.textContent = pack.adult ? 'Только для взрослых.' : pack.note;
+  node.classList.toggle('is-adult', pack.adult);
 }
 
 function homeError(msg) {
@@ -141,20 +196,23 @@ async function withBusy(btn, fn) {
   }
 }
 
-el.create.addEventListener('click', () =>
+el.create.addEventListener('click', () => {
+  if (!confirmAdult(el.pack.value)) return;
   withBusy(el.create, async () => {
     rememberName();
     rememberTimer();
     const code = await room.createOnline(
       profile(),
       el.mode.value,
-      readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess)
+      readHomeSettings(),
+      el.pack.value
     );
     location.hash = code;
     showGame();
     el.status.textContent = 'Комната открыта — ждём игроков';
-  })
-);
+    rememberPack();
+  });
+});
 
 el.join.addEventListener('click', () =>
   withBusy(el.join, async () => {
@@ -172,12 +230,15 @@ el.code.addEventListener('keydown', (e) => {
 });
 
 el.local.addEventListener('click', () => {
+  if (!confirmAdult(el.pack.value)) return;
   rememberName();
   rememberTimer();
+  rememberPack();
   room.startLocal(
     profile(),
     el.mode.value,
-    readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess)
+    readHomeSettings(),
+    el.pack.value
   );
   showGame();
   el.status.textContent = 'Игра на одном устройстве';
@@ -236,26 +297,74 @@ el.toggleKey.addEventListener('change', () => {
   room.dispatch({ t: 'localReveal', value: el.toggleKey.checked });
 });
 
+let clueCountManual = false;
+let clueCountFor = '';
+
+el.clueCount.addEventListener('input', () => {
+  clueCountManual = true;
+});
+
 el.clueForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const word = el.clueWord.value.trim();
   if (!word) return;
+  if (/\s/.test(word)) {
+    toast('Подсказка — одно слово');
+    return;
+  }
   room.dispatch({ t: 'clue', word, count: Number(el.clueCount.value) });
   el.clueWord.value = '';
   el.clueCount.value = '1';
+  clueCountManual = false;
 });
 
 el.endTurn.addEventListener('click', () => room.dispatch({ t: 'endTurn' }));
 
-const startNew = () => {
-  if (!confirm('Начать новую партию?')) return;
-  room.dispatch({ t: 'newGame', mode: room.boardMode });
+el.begin.addEventListener('click', () => room.dispatch({ t: 'begin' }));
+
+function currentPackId() {
+  return (room.view && room.view.pack) || room.packId;
+}
+
+function dispatchNewGame(packId) {
+  if (!confirmAdult(packId)) return false;
+  const view = room.view;
+  room.dispatch({
+    t: 'newGame',
+    mode: (view && view.mode) || room.boardMode,
+    pack: packId
+  });
+  localStorage.setItem('cnpix:pack', packId);
+  el.newGameDialog.hidden = true;
   el.result.hidden = true;
   resultShownFor = null;
+  return true;
+}
+
+const startNew = () => {
+  const inLobby = room.view && room.view.phase === 'lobby';
+  if (inLobby) {
+    if (!confirm('Перемешать поле? Партия ещё не началась.')) return;
+    dispatchNewGame(currentPackId());
+    return;
+  }
+  if (!canEditSettings()) {
+    if (!confirm('Начать новую партию? Таймер снова включится только после кнопки «Начать игру».')) return;
+    dispatchNewGame(currentPackId());
+    return;
+  }
+  el.newGamePack.value = currentPackId();
+  paintPackNote(el.newGamePackNote, getPack(el.newGamePack.value));
+  el.newGameDialog.hidden = false;
 };
 el.newGame.addEventListener('click', startNew);
 el.newGame2.addEventListener('click', startNew);
-el.closeResult.addEventListener('click', () => (el.result.hidden = true));
+el.newGameCancel.addEventListener('click', () => {
+  el.newGameDialog.hidden = true;
+});
+el.newGameConfirm.addEventListener('click', () => dispatchNewGame(el.newGamePack.value));
+el.newGamePack.addEventListener('change', () => paintPackNote(el.newGamePackNote, getPack(el.newGamePack.value)));
+el.closeResult.addEventListener('click', () => room.dispatch({ t: 'review' }));
 
 let toastTimer = null;
 function toast(text) {
@@ -290,12 +399,16 @@ function render() {
 
   renderBoard(view);
   renderScore(view);
+  renderLobby(view);
   renderClue(view);
+  renderClueHistory(view);
   renderSeat(view);
+  renderBot(view);
   renderPlayers();
   renderLog(view);
   renderResult(view);
   renderTimerSettings(view);
+  renderPack(view);
   fitBoard();
 }
 
@@ -324,6 +437,31 @@ function fitBoard() {
   const cardW = Math.max(36, Math.min(byWidth, byHeight));
 
   el.board.style.width = `${Math.floor(cardW * cols + (cols - 1) * gap)}px`;
+  fitWordFaces();
+}
+
+/** Длинное слово остаётся одной строкой: шрифт уменьшается, буква не переносится. */
+function fitWordFaces() {
+  for (const face of el.board.querySelectorAll('.word-face')) {
+    const art = face.parentElement;
+    if (!art) continue;
+    const style = getComputedStyle(art);
+    const max = art.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    if (max <= 0) continue;
+    face.style.fontSize = '';
+    let hi = parseFloat(getComputedStyle(face).fontSize);
+    if (!hi) continue;
+    face.style.fontSize = `${hi}px`;
+    if (face.scrollWidth <= max) continue;
+    let lo = 8;
+    while (hi - lo > 0.5) {
+      const mid = (hi + lo) / 2;
+      face.style.fontSize = `${mid}px`;
+      if (face.scrollWidth > max) hi = mid;
+      else lo = mid;
+    }
+    face.style.fontSize = `${lo}px`;
+  }
 }
 
 let fitScheduled = false;
@@ -341,7 +479,8 @@ window.addEventListener('resize', scheduleFit);
 window.addEventListener('orientationchange', scheduleFit);
 
 function renderBoard(view) {
-  const signature = `${view.seed}:${view.cols}`;
+  const showFaces = view.phase !== 'lobby';
+  const signature = `${view.seed}:${view.cols}:${view.pack || ''}:${showFaces ? 'play' : 'wait'}`;
   if (signature !== boardSignature) {
     boardSignature = signature;
     el.board.style.setProperty('--cols-base', view.cols);
@@ -353,7 +492,7 @@ function renderBoard(view) {
       btn.className = 'card';
       btn.type = 'button';
       btn.dataset.i = i;
-      btn.append(renderPicture(card.pic));
+      if (showFaces && card.face) btn.append(renderFace(card.face));
 
       const dot = document.createElement('span');
       dot.className = 'hint-dot';
@@ -365,7 +504,8 @@ function renderBoard(view) {
 
       btn.addEventListener('click', () => {
         if (!btn.classList.contains('is-clickable')) return;
-        room.dispatch({ t: 'pick', index: i });
+        const view = room.view;
+        room.dispatch(view && canClue(view) ? { t: 'highlight', index: i } : { t: 'pick', index: i });
       });
       el.board.append(btn);
       return btn;
@@ -373,11 +513,17 @@ function renderBoard(view) {
   }
 
   const guessing = canGuess(view);
+  const highlighting = canClue(view);
   const marks = view.marks || [];
   view.cards.forEach((card, i) => {
     const btn = cardEls[i];
     if (!btn) return;
     btn.className = 'card';
+    if (!showFaces) {
+      btn.classList.add('is-concealed');
+      btn.setAttribute('aria-label', `Карточка ${i + 1} скрыта до старта`);
+      return;
+    }
     if (card.key) {
       btn.classList.add(card.revealed ? `key-${card.key}` : `hint-${card.key}`);
     }
@@ -387,11 +533,11 @@ function renderBoard(view) {
         card.key === 'assassin' ? '💀' : card.key === 'neutral' ? '🧍' : '🕵️';
     } else {
       btn.querySelector('.veil').textContent = '';
-      if (guessing) btn.classList.add('is-clickable');
+      if (guessing || highlighting) btn.classList.add('is-clickable');
     }
 
     const mine = marks.find((m) => m.index === i && m.id === room.me.id);
-    if (mine && guessing && !card.revealed) btn.classList.add('is-armed');
+    if (mine && (guessing || highlighting) && !card.revealed) btn.classList.add('is-armed');
 
     const box = btn.querySelector('.marks');
     box.replaceChildren();
@@ -404,13 +550,16 @@ function renderBoard(view) {
       box.append(s);
     }
 
+    const faceName = card.face && card.face.kind === 'word' ? ` «${card.face.text}»` : '';
     btn.setAttribute(
       'aria-label',
       card.revealed
-        ? `Карточка ${i + 1}, открыта`
+        ? `Карточка ${i + 1}${faceName}, открыта`
+        : mine && highlighting
+        ? `Карточка ${i + 1}${faceName}, ваша метка — повтор снимет её`
         : mine
-        ? `Карточка ${i + 1}, ваша метка — второй клик откроет`
-        : `Карточка ${i + 1}`
+        ? `Карточка ${i + 1}${faceName}, ваша метка — второй клик откроет`
+        : `Карточка ${i + 1}${faceName}`
     );
   });
 }
@@ -418,8 +567,16 @@ function renderBoard(view) {
 function renderScore(view) {
   el.scoreRed.textContent = view.counts.red;
   el.scoreBlue.textContent = view.counts.blue;
+  el.scoreRed.parentElement.setAttribute('aria-label', `Красным осталось угадать ${view.counts.red}`);
+  el.scoreBlue.parentElement.setAttribute('aria-label', `Синим осталось угадать ${view.counts.blue}`);
 
   el.turn.className = 'turn-banner';
+  if (view.phase === 'lobby') {
+    el.turn.classList.add('is-lobby');
+    el.turnText.textContent = 'Игра ещё не началась';
+    paintTimer(view);
+    return;
+  }
   if (view.phase === 'over') {
     el.turn.classList.add('is-over');
     el.turnText.textContent = `Победа ${TEAM[view.winner].gen}`;
@@ -427,11 +584,33 @@ function renderScore(view) {
     return;
   }
   el.turn.classList.add(view.turn === 'red' ? 'is-red' : 'is-blue');
+  const bonus =
+    view.phase === 'clue' && view.firstClueBonus && view.settings && view.settings.timerOn ? ' (+2 мин)' : '';
   el.turnText.textContent =
     view.phase === 'clue'
-      ? `Ход ${TEAM[view.turn].gen}: капитан думает`
+      ? `Ход ${TEAM[view.turn].gen}: капитан думает${bonus}`
       : `Ход ${TEAM[view.turn].gen}: угадывают`;
   paintTimer(view);
+}
+
+function canBegin() {
+  return room.mode === 'local' || room.mode === 'host';
+}
+
+function renderLobby(view) {
+  const lobby = view.phase === 'lobby';
+  el.lobbyBar.hidden = !lobby;
+  el.newGame.textContent = lobby ? 'Перемешать' : 'Новая игра';
+  if (!lobby) return;
+  const starter = canBegin();
+  el.begin.hidden = !starter;
+  const bonus =
+    view.settings && view.settings.timerOn
+      ? ` Первому капитану на первую подсказку добавляются ${FIRST_CLUE_BONUS_SEC / 60} минуты.`
+      : '';
+  el.lobbyText.textContent = starter
+    ? `Выберите команды и роли, затем нажмите «Начать игру». Карточки и таймер — только после старта.${bonus}`
+    : `Выберите команду и роль. Карточки откроются, когда создатель комнаты нажмёт «Начать игру».${bonus}`;
 }
 
 function renderClue(view) {
@@ -448,19 +627,73 @@ function renderClue(view) {
     el.clueStrip.hidden = true;
   }
 
-  if (view.phase === 'over') {
+  if (view.phase === 'lobby') {
+    el.clueInfo.textContent = canBegin()
+      ? 'Подсказки откроются после старта партии.'
+      : 'Ждём, пока создатель комнаты начнёт партию.';
+  } else if (view.phase === 'over') {
     el.clueInfo.textContent = 'Партия окончена.';
   } else if (showForm) {
-    el.clueInfo.textContent = 'Введите слово и количество карточек.';
+    const bonus = view.firstClueBonus && view.settings && view.settings.timerOn ? ' На эту подсказку у вас на 2 минуты больше.' : '';
+    el.clueInfo.textContent = `Отметьте карточки на поле — число подставится само, его можно изменить.${bonus}`;
+    syncClueCount(view);
   } else if (view.phase === 'clue') {
-    el.clueInfo.textContent = `Капитан ${TEAM[view.turn].gen} придумывает подсказку…`;
+    el.clueInfo.textContent =
+      view.firstClueBonus && view.settings && view.settings.timerOn
+        ? `Капитан ${TEAM[view.turn].gen} придумывает первую подсказку — у него на 2 минуты больше.`
+        : `Капитан ${TEAM[view.turn].gen} придумывает подсказку…`;
   } else if (canGuess(view)) {
-    el.clueInfo.textContent = 'Первый клик — метка, второй по той же карточке — открыть.';
+    el.clueInfo.textContent = 'Клик ставит метку — можно отметить несколько. Повтор по той же карточке открывает её.';
   } else {
     el.clueInfo.textContent = `Угадывают ${TEAM[view.turn].nom}.`;
   }
 
   el.endTurn.hidden = !canGuess(view);
+}
+
+function syncClueCount(view) {
+  const stamp = `${view.seed}:${view.turn}:${(view.clues || []).length}`;
+  if (stamp !== clueCountFor) {
+    clueCountFor = stamp;
+    clueCountManual = false;
+  }
+  if (clueCountManual || document.activeElement === el.clueCount) return;
+  const n = (view.marks || []).filter((m) => m.id === room.me.id).length;
+  el.clueCount.value = n > 0 ? String(Math.min(9, n)) : '1';
+}
+
+function renderClueHistory(view) {
+  const clues = view.clues || [];
+  el.clueHistory.replaceChildren();
+  el.clueHistory.hidden = clues.length === 0;
+  el.clueHistoryEmpty.hidden = clues.length > 0;
+  clues.forEach((c, i) => {
+    const li = document.createElement('li');
+    li.className = c.team === 'red' ? 'is-red' : 'is-blue';
+    const current = view.clue && i === clues.length - 1 && view.clue.word === c.word && view.clue.team === c.team;
+    if (current) li.classList.add('is-current');
+    const word = document.createElement('span');
+    word.className = 'word';
+    word.textContent = c.word;
+    const score = document.createElement('span');
+    score.className = 'score';
+    const announced = c.count ? String(c.count) : '∞';
+    const correct = String(c.correct || 0);
+    score.title = `Угадано верно: ${correct} из ${announced}`;
+    const hit = document.createElement('span');
+    hit.className = 'hit';
+    hit.textContent = correct;
+    const of = document.createElement('span');
+    of.className = 'of';
+    of.textContent = '/';
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = announced;
+    score.append(hit, of, num);
+    li.append(word, score);
+    el.clueHistory.append(li);
+  });
+  if (clues.length) el.clueHistory.scrollTop = el.clueHistory.scrollHeight;
 }
 
 function renderSeat(view) {
@@ -477,6 +710,68 @@ function renderSeat(view) {
   });
 }
 
+let botTeam = 'red';
+let botRole = 'spymaster';
+
+function paintBotChoices() {
+  el.botPanel.querySelectorAll('[data-bot-team]').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.botTeam === botTeam);
+  });
+  el.botPanel.querySelectorAll('[data-bot-role]').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.botRole === botRole);
+  });
+}
+
+el.botPanel.addEventListener('click', (e) => {
+  const teamBtn = e.target.closest('[data-bot-team]');
+  if (teamBtn) {
+    botTeam = teamBtn.dataset.botTeam;
+    paintBotChoices();
+    return;
+  }
+  const roleBtn = e.target.closest('[data-bot-role]');
+  if (roleBtn) {
+    botRole = roleBtn.dataset.botRole;
+    paintBotChoices();
+    return;
+  }
+  const remove = e.target.closest('[data-bot-remove]');
+  if (remove) room.dispatch({ t: 'removeBot', id: remove.dataset.botRemove });
+});
+
+el.addBot.addEventListener('click', () => {
+  room.dispatch({ t: 'addBot', team: botTeam, role: botRole });
+});
+
+function renderBot(view) {
+  const show = canEditSettings();
+  el.botPanel.hidden = !show;
+  if (!show) return;
+  const pack = getPack((view && view.pack) || room.packId);
+  const ready = pack.kind === 'word' || pack.id === 'classic';
+  el.addBot.disabled = !ready;
+  el.botNote.textContent = ready
+    ? 'Ходит на этом устройстве. Для слов и классических картинок.'
+    : 'Для этой колоды бот пока не умеет.';
+  paintBotChoices();
+  el.botList.replaceChildren();
+  for (const p of room.players) {
+    if (!p.bot) continue;
+    const li = document.createElement('li');
+    const team = p.team === 'red' ? 'красные' : 'синие';
+    const roleName = p.role === 'spymaster' ? 'капитан' : 'оперативник';
+    const label = document.createElement('span');
+    label.textContent = `Бот · ${roleName} · ${team}`;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn--small btn--ghost';
+    btn.dataset.botRemove = p.id;
+    btn.textContent = 'Убрать';
+    li.append(label, btn);
+    el.botList.append(li);
+  }
+}
+
 function renderPlayers() {
   el.players.innerHTML = '';
   if (!room.players.length) return;
@@ -491,7 +786,14 @@ function renderPlayers() {
     if (p.id === room.me.id) name.className = 'me';
     const role = document.createElement('span');
     role.className = 'role';
-    role.textContent = p.team ? (p.role === 'spymaster' ? 'капитан' : 'оперативник') : 'зритель';
+    const teamName = p.team === 'red' ? 'красные' : 'синие';
+    role.textContent = p.bot
+      ? `${p.role === 'spymaster' ? 'капитан' : 'оперативник'} · ${teamName}`
+      : p.team
+        ? p.role === 'spymaster'
+          ? 'капитан'
+          : 'оперативник'
+        : 'зритель';
     li.append(tint, name, role);
     el.players.append(li);
   }
@@ -511,7 +813,9 @@ function renderLog(view) {
 function logText(e) {
   switch (e.kind) {
     case 'start':
-      return `Начинают ${TEAM[e.team].nom}.`;
+      return e.bonus
+        ? `Начинают ${TEAM[e.team].nom}. Первому капитану +2 минуты на подсказку.`
+        : `Начинают ${TEAM[e.team].nom}.`;
     case 'clue':
       return `${cap(TEAM[e.team].nom)}: подсказка «${e.word}» — ${e.count || '∞'}.`;
     case 'reveal': {
@@ -542,6 +846,10 @@ function renderResult(view) {
     el.result.hidden = true;
     return;
   }
+  if (view.review) {
+    el.result.hidden = true;
+    return;
+  }
   if (resultShownFor === view.seed) return;
   resultShownFor = view.seed;
   el.resultTitle.textContent = `Победа ${TEAM[view.winner].gen}!`;
@@ -558,22 +866,35 @@ function escapeHtml(s) {
 }
 
 let clockOffset = 0;
+let clockStamp = '';
 let timerTick = null;
 
 function paintTimer(view) {
-  if (view.serverNow) clockOffset = view.serverNow - Date.now();
-  const on = !!(view.settings && view.settings.timerOn) && view.phase !== 'over' && view.timer && view.timer.endsAt;
+  const endsAt = view.timer && view.timer.endsAt;
+  const sample = view.serverNow || 0;
+  // serverNow приходит вместе со снимком состояния и больше не меняется,
+  // пока не придёт следующий. Если вычитать его на каждом кадре, прошедшее
+  // время сокращается ровно на ту же величину — цифры на экране замирают.
+  const stamp = `${sample}:${endsAt || 0}`;
+  if (stamp !== clockStamp) {
+    clockStamp = stamp;
+    clockOffset = sample ? sample - Date.now() : 0;
+  }
+  const on = !!(view.settings && view.settings.timerOn) && view.phase !== 'over' && view.phase !== 'lobby' && endsAt;
   el.timer.hidden = !on;
   if (!on) {
     el.timer.classList.remove('is-low');
+    el.timer.title = '';
     return;
   }
-  const left = Math.max(0, view.timer.endsAt - (Date.now() + clockOffset));
+  const left = Math.max(0, endsAt - (Date.now() + clockOffset));
   const sec = Math.ceil(left / 1000);
   const m = Math.floor(sec / 60);
   const s = String(sec % 60).padStart(2, '0');
   el.timer.textContent = `${m}:${s}`;
   el.timer.classList.toggle('is-low', sec <= 10);
+  el.timer.title =
+    view.phase === 'clue' && view.firstClueBonus ? 'Время на подсказку плюс 2 минуты первому капитану' : '';
 }
 
 function startTimerTick() {
@@ -586,18 +907,37 @@ function startTimerTick() {
 function stopTimerTick() {
   clearInterval(timerTick);
   timerTick = null;
+  clockStamp = '';
+  clockOffset = 0;
 }
 
 function canEditSettings() {
   return room.mode === 'local' || room.mode === 'host';
 }
 
+function renderPack(view) {
+  const pack = getPack(view.pack || room.packId);
+  const writable = canEditSettings() && view.phase === 'lobby';
+  if (document.activeElement !== el.gamePack) el.gamePack.value = pack.id;
+  el.gamePack.disabled = !writable;
+  if (view.phase !== 'lobby') {
+    const hint = canEditSettings() ? ' Другую колоду можно выбрать в «Новой игре».' : '';
+    paintPackNote(el.packNote, pack);
+    if (hint) el.packNote.textContent = (pack.adult ? 'Только для взрослых.' : pack.note) + hint;
+    return;
+  }
+  el.packNote.textContent = pack.adult
+    ? 'Колоду выбирает создатель комнаты. Сейчас это слова 18+.'
+    : 'Колоду выбирает создатель комнаты.';
+  el.packNote.classList.toggle('is-adult', pack.adult);
+}
+
 function renderTimerSettings(view) {
   const s = view.settings || room.settings;
   const writable = canEditSettings();
   if (document.activeElement !== el.gameTimerOn) el.gameTimerOn.checked = !!s.timerOn;
-  if (document.activeElement !== el.gameTimerClue) el.gameTimerClue.value = s.clueSec;
-  if (document.activeElement !== el.gameTimerGuess) el.gameTimerGuess.value = s.guessSec;
+  if (document.activeElement !== el.gameTimerClue) el.gameTimerClue.value = secondsToMinutes(s.clueSec, 3);
+  if (document.activeElement !== el.gameTimerGuess) el.gameTimerGuess.value = secondsToMinutes(s.guessSec, 1.5);
   el.gameTimerOn.disabled = !writable;
   el.gameTimerClue.disabled = !writable || !s.timerOn;
   el.gameTimerGuess.disabled = !writable || !s.timerOn;
@@ -615,6 +955,38 @@ function sendTimerSettings() {
 el.gameTimerOn.addEventListener('change', sendTimerSettings);
 el.gameTimerClue.addEventListener('change', sendTimerSettings);
 el.gameTimerGuess.addEventListener('change', sendTimerSettings);
+
+function fillPackSelect(select) {
+  select.replaceChildren();
+  for (const pack of PACK_LIST) {
+    const opt = document.createElement('option');
+    opt.value = pack.id;
+    opt.textContent = pack.adult ? `${pack.title} — ${pack.note}` : pack.title;
+    select.append(opt);
+  }
+}
+
+fillPackSelect(el.pack);
+fillPackSelect(el.gamePack);
+fillPackSelect(el.newGamePack);
+const savedPack = localStorage.getItem('cnpix:pack');
+if (savedPack) el.pack.value = getPack(savedPack).id;
+paintPackNote(el.packNoteHome, getPack(el.pack.value));
+el.pack.addEventListener('change', () => paintPackNote(el.packNoteHome, getPack(el.pack.value)));
+
+el.gamePack.addEventListener('change', () => {
+  const view = room.view;
+  if (!view || view.phase !== 'lobby' || !canEditSettings()) {
+    if (view) el.gamePack.value = view.pack || room.packId;
+    return;
+  }
+  const next = el.gamePack.value;
+  if (!confirmAdult(next)) {
+    el.gamePack.value = view.pack || room.packId;
+    return;
+  }
+  room.dispatch({ t: 'newGame', mode: view.mode || room.boardMode, pack: next });
+});
 
 // Подсказка по размерам поля в меню собирается из правил, чтобы не дублировать цифры.
 for (const opt of el.mode.options) {

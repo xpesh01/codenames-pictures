@@ -14,8 +14,8 @@
 <!-- ───────────────── Главный экран ───────────────── -->
 <section id="screen-home" class="screen screen--home">
   <div class="home-card">
-    <h1 class="logo">Кодовые&nbsp;имена<span>картинки</span></h1>
-    <p class="tagline">Два капитана, одна сетка странных картинок и ни одного шанса объясниться нормально.</p>
+    <h1 class="logo">Кодовые&nbsp;имена<span>картинки и слова</span></h1>
+    <p class="tagline">Два капитана, одна сетка карточек и ни одного шанса объясниться нормально.</p>
 
     <label class="field">
       <span>Ваше имя</span>
@@ -23,10 +23,16 @@
     </label>
 
     <label class="field">
+      <span>Колода</span>
+      <select id="input-pack"></select>
+      <p id="pack-note-home" class="muted small pack-note"></p>
+    </label>
+
+    <label class="field">
       <span>Размер поля</span>
       <select id="input-mode">
-        <option value="pictures">5×4 — 20 картинок (классические «Картинки»)</option>
-        <option value="big">5×5 — 25 картинок (длиннее партия)</option>
+        <option value="pictures">5×4 — 20 карточек</option>
+        <option value="big">5×5 — 25 карточек</option>
       </select>
     </label>
 
@@ -37,11 +43,23 @@
         <span>Ограничить время хода</span>
       </label>
       <div id="home-timer-fields" class="timer-fields" hidden>
-        <label>Капитан, сек
-          <input id="home-timer-clue" type="number" min="10" max="300" value="60" inputmode="numeric">
+        <label>Капитан, мин
+          <input id="home-timer-clue" type="number" min="0.5" max="10" step="0.1" value="3" inputmode="decimal">
         </label>
-        <label>Угадывание, сек
-          <input id="home-timer-guess" type="number" min="10" max="300" value="90" inputmode="numeric">
+        <label>Угадывание, мин
+          <input id="home-timer-guess" type="number" min="0.5" max="10" step="0.1" value="1.5" inputmode="decimal">
+        </label>
+      </div>
+    </div>
+
+    <div class="field">
+      <span>Бот думает</span>
+      <div class="timer-fields">
+        <label>Капитан, сек
+          <input id="home-bot-clue" type="number" min="0" max="30" step="1" value="5" inputmode="numeric">
+        </label>
+        <label>Оперативник, сек
+          <input id="home-bot-guess" type="number" min="0" max="30" step="1" value="5" inputmode="numeric">
         </label>
       </div>
     </div>
@@ -78,12 +96,23 @@
   </header>
 
   <div class="scorebar">
-    <div class="score score--red"><span id="score-red">0</span></div>
+    <div class="score score--red">
+      <span id="score-red">0</span>
+      <span class="score__label">осталось</span>
+    </div>
     <div id="turn-banner" class="turn-banner">
       <span id="turn-text">—</span>
       <span id="timer" class="timer" hidden>0:00</span>
     </div>
-    <div class="score score--blue"><span id="score-blue">0</span></div>
+    <div class="score score--blue">
+      <span id="score-blue">0</span>
+      <span class="score__label">осталось</span>
+    </div>
+  </div>
+
+  <div id="lobby-bar" class="lobby-bar" hidden>
+    <p id="lobby-text">Выберите команды и роли. Таймер пойдёт только после старта.</p>
+    <button id="btn-begin" class="btn btn--primary" type="button" hidden>Начать игру</button>
   </div>
 
   <main class="layout">
@@ -95,6 +124,12 @@
     </div>
 
     <aside class="panel">
+      <div class="panel__block">
+        <h2>Колода</h2>
+        <select id="game-pack"></select>
+        <p id="pack-note" class="muted small pack-note"></p>
+      </div>
+
       <div class="panel__block">
         <h2>Ваше место</h2>
         <div id="seat-online" class="seat">
@@ -129,6 +164,12 @@
       </div>
 
       <div class="panel__block">
+        <h2>Подсказки партии</h2>
+        <ol id="clue-history" class="clue-history" hidden></ol>
+        <p id="clue-history-empty" class="muted small">Пока никто не давал подсказок.</p>
+      </div>
+
+      <div class="panel__block">
         <h2>Таймер</h2>
         <div id="timer-settings" class="timer-settings">
           <label class="switch">
@@ -136,14 +177,15 @@
             <span>Включить</span>
           </label>
           <div class="timer-fields">
-            <label>Капитан, сек
-              <input id="game-timer-clue" type="number" min="10" max="300" value="60" inputmode="numeric">
+            <label>Капитан, мин
+              <input id="game-timer-clue" type="number" min="0.5" max="10" step="0.1" value="3" inputmode="decimal">
             </label>
-            <label>Угадывание, сек
-              <input id="game-timer-guess" type="number" min="10" max="300" value="90" inputmode="numeric">
+            <label>Угадывание, мин
+              <input id="game-timer-guess" type="number" min="0.5" max="10" step="0.1" value="1.5" inputmode="decimal">
             </label>
           </div>
           <p id="timer-hint" class="muted small">Настройки меняет создатель комнаты.</p>
+          <p class="muted small">На первой подсказке капитану, который ходит первым, добавляется 2 минуты.</p>
         </div>
       </div>
 
@@ -155,6 +197,21 @@
       <div class="panel__block panel__block--grow">
         <h2>Журнал</h2>
         <ol id="log" class="log"></ol>
+      </div>
+
+      <div id="block-bot" class="panel__block" hidden>
+        <h2>ИИ-бот</h2>
+        <p id="bot-note" class="muted small">Ходит на этом устройстве. Для слов и классических картинок.</p>
+        <div class="seat__row">
+          <button type="button" class="chip chip--red is-active" data-bot-team="red">Красные</button>
+          <button type="button" class="chip chip--blue" data-bot-team="blue">Синие</button>
+        </div>
+        <div class="seat__row">
+          <button type="button" class="chip is-active" data-bot-role="spymaster">Капитан</button>
+          <button type="button" class="chip" data-bot-role="operative">Оперативник</button>
+        </div>
+        <button id="btn-add-bot" class="btn btn--wide" type="button">Добавить бота</button>
+        <ul id="bot-list" class="bot-list"></ul>
       </div>
     </aside>
   </main>
@@ -170,6 +227,22 @@
     </div>
   </div>
 </section>
+
+<div id="new-game-dialog" class="result new-game-dialog" hidden>
+  <div class="result__card">
+    <h2>Новая партия</h2>
+    <p class="muted">Выберите колоду. Карточки и таймер появятся после «Начать игру».</p>
+    <label class="field">
+      <span>Колода</span>
+      <select id="new-game-pack"></select>
+      <p id="new-game-pack-note" class="muted small pack-note"></p>
+    </label>
+    <div class="result__actions">
+      <button id="btn-new-confirm" class="btn btn--primary" type="button">Собрать поле</button>
+      <button id="btn-new-cancel" class="btn btn--ghost" type="button">Отмена</button>
+    </div>
+  </div>
+</div>
 
 <div id="toast" class="toast" hidden></div>
 

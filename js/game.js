@@ -1,16 +1,18 @@
 // Правила игры. Чистая логика без DOM и без сети — её гоняет хост комнаты.
 
 import { makeRng, shuffle } from './rng.js';
-import { generatePictures } from './pictures.js';
+import { getPack } from './packs.js';
 
 export const MODES = {
-  pictures: { id: 'pictures', label: '5×4 — 20 картинок', cols: 5, rows: 4, first: 8, second: 7, neutral: 4 },
-  big: { id: 'big', label: '5×5 — 25 картинок', cols: 5, rows: 5, first: 9, second: 8, neutral: 7 }
+  pictures: { id: 'pictures', label: '5×4 — 20 карточек', cols: 5, rows: 4, first: 8, second: 7, neutral: 4 },
+  big: { id: 'big', label: '5×5 — 25 карточек', cols: 5, rows: 5, first: 9, second: 8, neutral: 7 }
 };
 
 export const UNLIMITED = 99;
 export const TEAMS = ['red', 'blue'];
 export const other = (team) => (team === 'red' ? 'blue' : 'red');
+/** Дополнительные секунды на первую подсказку команды, которая ходит первой. */
+export const FIRST_CLUE_BONUS_SEC = 120;
 
 const TOKEN_COLORS = ['#ffd166', '#06d6a0', '#ef476f', '#4cc9f0', '#f78c6b', '#c77dff', '#80ed99', '#ffadad'];
 
@@ -18,11 +20,25 @@ export function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+function asMinutes(min, sec, fallback) {
+  let n = NaN;
+  if (min != null && min !== '') n = Number(String(min).replace(',', '.'));
+  else if (sec != null && sec !== '') n = Number(sec) / 60;
+  else n = fallback;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** В интерфейсе время в минутах (можно дробное, шаг 0,1), в партии — секунды. */
 export function normalizeSettings(raw = {}) {
+  const clueMin = clamp(Math.round(asMinutes(raw.clueMin, raw.clueSec, 3) * 10) / 10, 0.5, 10);
+  const guessMin = clamp(Math.round(asMinutes(raw.guessMin, raw.guessSec, 1.5) * 10) / 10, 0.5, 10);
+  const botSec = (value) => clamp(Math.round(Number.isFinite(Number(value)) ? Number(value) : 5), 0, 30);
   return {
     timerOn: !!raw.timerOn,
-    clueSec: clamp(Math.round(Number(raw.clueSec) || 60), 10, 300),
-    guessSec: clamp(Math.round(Number(raw.guessSec) || 90), 10, 300)
+    clueSec: Math.round(clueMin * 60),
+    guessSec: Math.round(guessMin * 60),
+    botClueSec: botSec(raw.botClueSec),
+    botGuessSec: botSec(raw.botGuessSec)
   };
 }
 
@@ -41,11 +57,12 @@ export function playerInitial(name) {
   return (chars[0] || '?').toUpperCase();
 }
 
-export function createGame(seed, modeId = 'pictures') {
+export function createGame(seed, modeId = 'pictures', packId = 'classic') {
   const mode = MODES[modeId] || MODES.pictures;
+  const pack = getPack(packId);
   const rnd = makeRng(seed);
   const total = mode.cols * mode.rows;
-  const pictures = generatePictures(total, rnd);
+  const faces = pack.deal(total, rnd);
 
   const starting = rnd() < 0.5 ? 'red' : 'blue';
   const keys = [
@@ -58,26 +75,40 @@ export function createGame(seed, modeId = 'pictures') {
   return {
     seed,
     mode: mode.id,
+    pack: pack.id,
     cols: mode.cols,
     rows: mode.rows,
     starting,
     turn: starting,
-    phase: 'clue', // clue -> guess -> ... -> over
+    phase: 'lobby', // lobby -> clue -> guess -> ... -> over
+    firstClueBonus: true,
     clue: null,
+    clues: [],
     guessesLeft: 0,
     winner: null,
     endedBy: null,
+    review: false,
     cards: shuffle(keys, rnd).map((key, i) => ({
       key,
       revealed: false,
-      pic: pictures[i],
+      face: faces[i],
       revealedBy: null
     })),
     marks: {},
     timer: { endsAt: null, duration: 0, startedAt: null },
-    log: [{ kind: 'start', team: starting, at: Date.now() }],
+    log: [],
     version: 1
   };
+}
+
+/** Игроки уже сели. С этого момента можно давать подсказки, и хост запускает таймер. */
+export function startMatch(state) {
+  if (!state || state.phase !== 'lobby') return false;
+  state.phase = 'clue';
+  state.firstClueBonus = true;
+  state.log.push({ kind: 'start', team: state.starting, at: Date.now() });
+  state.version++;
+  return true;
 }
 
 export function remaining(state, team) {
@@ -86,13 +117,15 @@ export function remaining(state, team) {
 
 export function giveClue(state, team, word, count) {
   if (state.phase !== 'clue' || state.turn !== team) return false;
-  const clean = String(word || '').trim().slice(0, 40);
-  if (!clean) return false;
+  const clean = String(word || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  if (!clean || /\s/.test(clean)) return false;
   const n = Math.max(0, Math.min(9, Number(count) || 0));
   state.clue = { word: clean, count: n, team };
+  state.clues.push({ word: clean, count: n, team, correct: 0 });
   // «0» — классическая подсказка без ограничения числа попыток.
   // Держим её конечным числом, иначе Infinity превратится в null при передаче по сети.
   state.guessesLeft = n === 0 ? UNLIMITED : n + 1;
+  state.firstClueBonus = false;
   state.phase = 'guess';
   state.log.push({ kind: 'clue', team, word: clean, count: n, at: Date.now() });
   state.version++;
@@ -107,6 +140,10 @@ export function revealCard(state, team, index) {
   card.revealed = true;
   card.revealedBy = team;
   clearMarksOn(state, index);
+  if (card.key === team) {
+    const clue = state.clues[state.clues.length - 1];
+    if (clue && clue.team === team) clue.correct = (clue.correct || 0) + 1;
+  }
   state.log.push({ kind: 'reveal', team, index, key: card.key, at: Date.now() });
 
   if (card.key === 'assassin') {
@@ -158,25 +195,57 @@ function finish(state, winner, endedBy) {
   state.version++;
 }
 
-/** Первый клик: поставить или перенести метку. Повтор по той же карточке — сигнал «открыть». */
+function markList(state, playerId) {
+  const cur = state.marks[playerId];
+  if (Array.isArray(cur)) return cur;
+  if (Number.isInteger(cur)) return [cur];
+  return [];
+}
+
+/** Метка капитана на этапе подсказки: повторный клик снимает её и ничего не открывает. */
+export function toggleMark(state, playerId, index) {
+  if (state.phase !== 'clue') return null;
+  const card = state.cards[index];
+  if (!card || card.revealed) return null;
+  const list = markList(state, playerId);
+  const at = list.indexOf(index);
+  if (at >= 0) list.splice(at, 1);
+  else list.push(index);
+  if (list.length) state.marks[playerId] = list;
+  else delete state.marks[playerId];
+  state.version++;
+  return at >= 0 ? 'cleared' : 'tagged';
+}
+
+/** Клик добавляет метку, не снимая остальные. Повтор по той же карточке — сигнал «открыть». */
 export function setMark(state, playerId, index) {
   if (state.phase !== 'guess') return null;
   const card = state.cards[index];
   if (!card || card.revealed) return null;
-  if (state.marks[playerId] === index) return 'ready';
-  state.marks[playerId] = index;
+  const list = markList(state, playerId);
+  if (list.includes(index)) return 'ready';
+  list.push(index);
+  state.marks[playerId] = list;
   state.version++;
   return 'tagged';
 }
 
 export function clearMarksOn(state, index) {
   for (const id of Object.keys(state.marks)) {
-    if (state.marks[id] === index) delete state.marks[id];
+    const cur = state.marks[id];
+    if (Array.isArray(cur)) {
+      const next = cur.filter((i) => i !== index);
+      if (next.length) state.marks[id] = next;
+      else delete state.marks[id];
+    } else if (cur === index) {
+      delete state.marks[id];
+    }
   }
 }
 
 export function expireTurn(state) {
   if (state.phase !== 'clue' && state.phase !== 'guess') return false;
+  state.firstClueBonus = false;
   state.log.push({ kind: 'timeout', team: state.turn, at: Date.now() });
   passTurn(state);
   state.version++;
@@ -184,18 +253,21 @@ export function expireTurn(state) {
 }
 
 /**
- * Версия состояния для конкретного игрока: оперативникам ключи
- * нераскрытых карточек не отправляются вообще, чтобы их нельзя было
- * подсмотреть в консоли браузера.
+ * Версия состояния для конкретного игрока. До старта лица карточек и ключ
+ * не отправляются. Оперативникам ключи нераскрытых карточек не отправляются
+ * и после старта, чтобы их нельзя было подсмотреть в консоли браузера.
+ * После «Посмотреть поле» ключ виден всем, как капитану.
  */
 export function viewFor(state, isSpymaster) {
+  const open = state.phase !== 'lobby';
+  const showKey = isSpymaster || (state.phase === 'over' && state.review);
   return {
     ...state,
     cards: state.cards.map((c) => ({
-      pic: c.pic,
+      face: open ? c.face : null,
       revealed: c.revealed,
       revealedBy: c.revealedBy,
-      key: c.revealed || isSpymaster ? c.key : null
+      key: open && (c.revealed || showKey) ? c.key : null
     })),
     counts: { red: remaining(state, 'red'), blue: remaining(state, 'blue') },
     youAreSpymaster: isSpymaster
