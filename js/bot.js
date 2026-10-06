@@ -9,13 +9,7 @@ import { WORDS_18 } from './words18.js';
 const ASSASSIN_MARGIN = 0.15;
 const ENEMY_MARGIN = 0.1;
 const MIN_MULTI = 0.52;
-// У картинки вектор — среднее подписей, близости сжаты, поэтому зазор
-// до чёрной карты и чужой команды меньше, чем у одного слова.
-const PICTURE_MIN_MULTI = 0.28;
-const PICTURE_ASSASSIN_MARGIN = 0.05;
-const PICTURE_ENEMY_MARGIN = 0.04;
 const MAX_DROP = 0.2;
-const PICTURE_MAX_DROP = 0.28;
 const COUNT_BONUS = 0.04;
 const MAX_CLUE = 3;
 const GUESS_CONTINUE = 0.3;
@@ -95,6 +89,48 @@ function clashes(candidate, board) {
   return false;
 }
 
+/** 0 — осторожно, одно слово. 100 — длинные подсказки. 50 — прежние пороги. */
+function limitsFor(risk, picture) {
+  const n = Number(risk);
+  const t = (Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 50) / 100;
+  const mix = (safe, bold) => safe + (bold - safe) * t;
+  const shared = {
+    t,
+    maxClue: Math.round(1 + t * 4),
+    countBonus: mix(0, 0.08, t)
+  };
+  if (picture) {
+    return {
+      ...shared,
+      minMulti: mix(0.46, 0.1, t),
+      assassinMargin: mix(0.1, 0, t),
+      enemyMargin: mix(0.08, 0, t),
+      maxDrop: mix(0.14, 0.42, t)
+    };
+  }
+  return {
+    ...shared,
+    minMulti: mix(0.64, 0.4, t),
+    assassinMargin: mix(0.24, 0.06, t),
+    enemyMargin: mix(0.16, 0.04, t),
+    maxDrop: mix(0.1, 0.3, t)
+  };
+}
+
+function keepClue(best, option, t) {
+  if (!option) return best;
+  if (!best) return option;
+  if (t > 0.5) {
+    if (option.count !== best.count) return option.count > best.count ? option : best;
+    return option.score > best.score ? option : best;
+  }
+  if (t < 0.5) return option.score > best.score ? option : best;
+  const optionMulti = option.count >= 2;
+  const bestMulti = best.count >= 2;
+  if (optionMulti !== bestMulti) return optionMulti ? option : best;
+  return option.score > best.score ? option : best;
+}
+
 /**
  * Сколько своих карт оперативник снимет этой подсказкой, пока не упрётся
  * в чёрную или в чужую. Число объявляется так, чтобы лишняя попытка
@@ -105,6 +141,8 @@ function assessClue(row, live, team, limits = {}) {
   const assassinMargin = limits.assassinMargin ?? ASSASSIN_MARGIN;
   const enemyMargin = limits.enemyMargin ?? ENEMY_MARGIN;
   const maxDrop = limits.maxDrop ?? MAX_DROP;
+  const maxClue = limits.maxClue ?? MAX_CLUE;
+  const countBonus = limits.countBonus ?? COUNT_BONUS;
   const order = [];
   for (let i = 0; i < live.length; i++) order.push(i);
   order.sort((a, b) => row[b] - row[a]);
@@ -119,7 +157,7 @@ function assessClue(row, live, team, limits = {}) {
 
   const group = [];
   for (const i of order) {
-    if (group.length >= MAX_CLUE) break;
+    if (group.length >= maxClue) break;
     if (live[i].key !== team) break;
     const sim = row[i];
     if (assassinSim != null && sim < assassinSim + assassinMargin) break;
@@ -137,42 +175,36 @@ function assessClue(row, live, team, limits = {}) {
   const weak = group[count - 1];
   const gapA = assassinSim == null ? weak : weak - assassinSim;
   const gapE = enemySim == null ? gapA : weak - enemySim;
-  return { count, score: Math.min(gapA, gapE) + COUNT_BONUS * (count - 1) };
+  return { count, score: Math.min(gapA, gapE) + countBonus * (count - 1) };
 }
 
 /**
- * Последняя своя карта. Победа наступает с первого верного открытия,
- * поэтому хватает того, что она ближе любой другой: иначе капитан молчит
- * и партия стоит.
+ * Одна карта, которая ближе любой другой. Нужна, когда порог риска
+ * не пускает пару, но молчать уже нельзя.
  */
-function clueForLastCard(pool, live, team) {
-  let ownIndex = -1;
-  let ownCount = 0;
-  for (let i = 0; i < live.length; i++) {
-    if (live[i].key !== team) continue;
-    ownCount++;
-    ownIndex = i;
-  }
-  if (ownCount !== 1) return null;
-
+function clueForClosest(pool, live, team) {
   let best = null;
   for (const item of pool) {
-    let ownSim = -2;
+    let top = -2;
     let second = -2;
-    for (let i = 0; i < live.length; i++) {
-      const sim = dot(item.vec, live[i].vec);
-      if (i === ownIndex) ownSim = sim;
-      else if (sim > second) second = sim;
+    let topKey = null;
+    for (const card of live) {
+      const sim = dot(item.vec, card.vec);
+      if (sim > top) {
+        second = top;
+        top = sim;
+        topKey = card.key;
+      } else if (sim > second) second = sim;
     }
-    if (!(ownSim > second)) continue;
-    const score = second === -2 ? ownSim : ownSim - second;
+    if (topKey !== team) continue;
+    const score = second === -2 ? top : top - second;
     if (!best || score > best.score) best = { word: item.word, count: 1, score };
   }
   return best;
 }
 
 /** Подсказка капитана. cards: { text, key, revealed }. */
-export function chooseClue({ cards, team, packId }) {
+export function chooseClue({ cards, team, packId, risk }) {
   if (!vectors) throw new Error('Векторы ещё не загружены');
   const board = [];
   for (const card of cards) {
@@ -210,20 +242,18 @@ export function chooseClue({ cards, team, packId }) {
   }
   if (!live.some((card) => card.key === team)) return null;
 
-  let bestMulti = null;
-  let bestSingle = null;
+  const limits = limitsFor(risk, false);
+  let best = null;
   for (const item of pool) {
     const row = new Float32Array(live.length);
     for (let i = 0; i < live.length; i++) row[i] = dot(item.vec, live[i].vec);
-    const option = assessClue(row, live, team);
+    const option = assessClue(row, live, team, limits);
     if (!option) continue;
     option.word = item.word;
-    if (option.count >= 2) {
-      if (!bestMulti || option.score > bestMulti.score) bestMulti = option;
-    } else if (!bestSingle || option.score > bestSingle.score) bestSingle = option;
+    best = keepClue(best, option, limits.t);
   }
 
-  const picked = bestMulti || bestSingle || clueForLastCard(pool, live, team);
+  const picked = best || clueForClosest(pool, live, team);
   return picked ? { word: picked.word, count: picked.count } : null;
 }
 
@@ -298,7 +328,7 @@ function pictureLabelsOf(file) {
 }
 
 /** Подсказка капитана по картинкам. cards: { file, key, revealed }. */
-export function choosePictureClue({ cards, team }) {
+export function choosePictureClue({ cards, team, risk }) {
   if (!pictureVectors || !pictureLabels || !vectors) throw new Error('Векторы картинок ещё не загружены');
   const labelWords = new Map();
   for (const items of Object.values(pictureLabels)) {
@@ -338,25 +368,18 @@ export function choosePictureClue({ cards, team }) {
   );
   if (assassinMissing || !live.some((card) => card.key === team)) return null;
 
-  let bestMulti = null;
-  let bestSingle = null;
+  const limits = limitsFor(risk, true);
+  let best = null;
   for (const item of pool) {
     const row = new Float32Array(live.length);
     for (let i = 0; i < live.length; i++) row[i] = dot(item.vec, live[i].vec);
-    const option = assessClue(row, live, team, {
-      minMulti: PICTURE_MIN_MULTI,
-      assassinMargin: PICTURE_ASSASSIN_MARGIN,
-      enemyMargin: PICTURE_ENEMY_MARGIN,
-      maxDrop: PICTURE_MAX_DROP
-    });
+    const option = assessClue(row, live, team, limits);
     if (!option) continue;
     option.word = item.word;
-    if (option.count >= 2) {
-      if (!bestMulti || option.score > bestMulti.score) bestMulti = option;
-    } else if (!bestSingle || option.score > bestSingle.score) bestSingle = option;
+    best = keepClue(best, option, limits.t);
   }
 
-  const picked = bestMulti || bestSingle || clueForLastCard(pool, live, team);
+  const picked = best || clueForClosest(pool, live, team);
   return picked ? { word: picked.word, count: picked.count } : null;
 }
 

@@ -238,7 +238,7 @@ export class Room {
         break;
       }
       case 'addBot': {
-        if (!this.isAuthority(playerId)) break;
+        if (!this.isAuthority(playerId) || !this.settings.botOn) break;
         const team = msg.team === 'red' || msg.team === 'blue' ? msg.team : null;
         const role = msg.role === 'spymaster' || msg.role === 'operative' ? msg.role : null;
         if (!team || !role) break;
@@ -377,7 +377,8 @@ export class Room {
                 key: card.key,
                 revealed: card.revealed
               })),
-              team: bot.team
+              team: bot.team,
+              risk: this.settings.botRisk
             })
           : chooseClue({
               cards: this.state.cards.map((card) => ({
@@ -386,7 +387,8 @@ export class Room {
                 revealed: card.revealed
               })),
               team: bot.team,
-              packId: this.packId
+              packId: this.packId,
+              risk: this.settings.botRisk
             });
         if (`${this.phaseStamp()}:${this.state.version}` !== stamp || bot.team !== this.state.turn) return;
         if (!clue) {

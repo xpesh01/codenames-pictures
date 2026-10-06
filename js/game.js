@@ -37,8 +37,10 @@ export function normalizeSettings(raw = {}) {
     timerOn: !!raw.timerOn,
     clueSec: Math.round(clueMin * 60),
     guessSec: Math.round(guessMin * 60),
+    botOn: !!raw.botOn,
     botClueSec: botSec(raw.botClueSec),
-    botGuessSec: botSec(raw.botGuessSec)
+    botGuessSec: botSec(raw.botGuessSec),
+    botRisk: clamp(Math.round(Number.isFinite(Number(raw.botRisk)) ? Number(raw.botRisk) : 50), 0, 100)
   };
 }
 

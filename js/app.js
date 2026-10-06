@@ -51,8 +51,6 @@ const el = {
   clueHistory: $('#clue-history'),
   clueHistoryEmpty: $('#clue-history-empty'),
   endTurn: $('#btn-endturn'),
-  gamePack: $('#game-pack'),
-  packNote: $('#pack-note'),
   newGameDialog: $('#new-game-dialog'),
   newGamePack: $('#new-game-pack'),
   newGamePackNote: $('#new-game-pack-note'),
@@ -64,14 +62,18 @@ const el = {
   botNote: $('#bot-note'),
   botList: $('#bot-list'),
   addBot: $('#btn-add-bot'),
-  log: $('#log'),
+  sidePanel: $('#side-panel'),
 
   homeTimerOn: $('#home-timer-on'),
   homeTimerFields: $('#home-timer-fields'),
   homeTimerClue: $('#home-timer-clue'),
   homeTimerGuess: $('#home-timer-guess'),
+  homeBotOn: $('#home-bot-on'),
+  homeBotFields: $('#home-bot-fields'),
   homeBotClue: $('#home-bot-clue'),
   homeBotGuess: $('#home-bot-guess'),
+  homeBotRisk: $('#home-bot-risk'),
+  homeBotRiskValue: $('#home-bot-risk-value'),
   gameTimerOn: $('#game-timer-on'),
   gameTimerClue: $('#game-timer-clue'),
   gameTimerGuess: $('#game-timer-guess'),
@@ -89,7 +91,6 @@ const TEAM = {
   red: { nom: 'красные', gen: 'красных', dat: 'красным' },
   blue: { nom: 'синие', gen: 'синих', dat: 'синим' }
 };
-const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
 let boardSignature = null;
 let cardEls = [];
@@ -108,10 +109,12 @@ try {
   const savedTimer = JSON.parse(localStorage.getItem('cnpix:timer') || 'null');
   if (savedTimer) {
     el.homeTimerOn.checked = !!savedTimer.timerOn;
+    if (el.homeBotOn) el.homeBotOn.checked = !!savedTimer.botOn;
     el.homeTimerClue.value = secondsToMinutes(savedTimer.clueMin != null ? savedTimer.clueMin * 60 : savedTimer.clueSec, 3);
     el.homeTimerGuess.value = secondsToMinutes(savedTimer.guessMin != null ? savedTimer.guessMin * 60 : savedTimer.guessSec, 1.5);
     if (savedTimer.botClueSec != null) el.homeBotClue.value = savedTimer.botClueSec;
     if (savedTimer.botGuessSec != null) el.homeBotGuess.value = savedTimer.botGuessSec;
+    if (savedTimer.botRisk != null && el.homeBotRisk) el.homeBotRisk.value = savedTimer.botRisk;
   }
 } catch (_) {
   /* битые настройки — оставляем значения по умолчанию */
@@ -120,6 +123,19 @@ el.homeTimerFields.hidden = !el.homeTimerOn.checked;
 el.homeTimerOn.addEventListener('change', () => {
   el.homeTimerFields.hidden = !el.homeTimerOn.checked;
 });
+if (el.homeBotOn && el.homeBotFields) {
+  el.homeBotFields.hidden = !el.homeBotOn.checked;
+  el.homeBotOn.addEventListener('change', () => {
+    el.homeBotFields.hidden = !el.homeBotOn.checked;
+  });
+}
+if (el.homeBotRisk && el.homeBotRiskValue) {
+  const paintBotRisk = () => {
+    el.homeBotRiskValue.textContent = el.homeBotRisk.value;
+  };
+  paintBotRisk();
+  el.homeBotRisk.addEventListener('input', paintBotRisk);
+}
 const hashCode = location.hash.replace(/^#\/?/, '').trim().toUpperCase();
 if (/^[A-Z0-9]{5}$/.test(hashCode)) {
   el.code.value = hashCode;
@@ -150,8 +166,10 @@ function readTimerSettings(onEl, clueEl, guessEl) {
 function readHomeSettings() {
   return normalizeSettings({
     ...readTimerSettings(el.homeTimerOn, el.homeTimerClue, el.homeTimerGuess),
+    botOn: !!(el.homeBotOn && el.homeBotOn.checked),
     botClueSec: el.homeBotClue.value,
-    botGuessSec: el.homeBotGuess.value
+    botGuessSec: el.homeBotGuess.value,
+    botRisk: el.homeBotRisk ? el.homeBotRisk.value : 50
   });
 }
 
@@ -405,10 +423,8 @@ function render() {
   renderSeat(view);
   renderBot(view);
   renderPlayers();
-  renderLog(view);
   renderResult(view);
   renderTimerSettings(view);
-  renderPack(view);
   fitBoard();
 }
 
@@ -744,7 +760,8 @@ el.addBot.addEventListener('click', () => {
 });
 
 function renderBot(view) {
-  const show = canEditSettings();
+  const settings = (view && view.settings) || room.settings;
+  const show = canEditSettings() && !!(settings && settings.botOn);
   el.botPanel.hidden = !show;
   if (!show) return;
   const pack = getPack((view && view.pack) || room.packId);
@@ -796,47 +813,6 @@ function renderPlayers() {
         : 'зритель';
     li.append(tint, name, role);
     el.players.append(li);
-  }
-}
-
-function renderLog(view) {
-  el.log.innerHTML = '';
-  const items = view.log.slice().reverse();
-  for (const e of items) {
-    const li = document.createElement('li');
-    li.className = e.team === 'red' ? 'r' : e.team === 'blue' ? 'b' : '';
-    li.textContent = logText(e);
-    el.log.append(li);
-  }
-}
-
-function logText(e) {
-  switch (e.kind) {
-    case 'start':
-      return e.bonus
-        ? `Начинают ${TEAM[e.team].nom}. Первому капитану +2 минуты на подсказку.`
-        : `Начинают ${TEAM[e.team].nom}.`;
-    case 'clue':
-      return `${cap(TEAM[e.team].nom)}: подсказка «${e.word}» — ${e.count || '∞'}.`;
-    case 'reveal': {
-      const what =
-        e.key === 'assassin'
-          ? 'убийцу'
-          : e.key === 'neutral'
-          ? 'нейтральную карточку'
-          : `агента ${TEAM[e.key].gen}`;
-      return `${cap(TEAM[e.team].nom)} открыли ${what}.`;
-    }
-    case 'turn':
-      return `Ход переходит к ${TEAM[e.team].dat}.`;
-    case 'timeout':
-      return `Время ${TEAM[e.team].gen} вышло.`;
-    case 'end':
-      return e.endedBy === 'assassin'
-        ? `Убийца! Победа ${TEAM[e.team].gen}.`
-        : `Все агенты найдены. Победа ${TEAM[e.team].gen}.`;
-    default:
-      return '';
   }
 }
 
@@ -915,23 +891,6 @@ function canEditSettings() {
   return room.mode === 'local' || room.mode === 'host';
 }
 
-function renderPack(view) {
-  const pack = getPack(view.pack || room.packId);
-  const writable = canEditSettings() && view.phase === 'lobby';
-  if (document.activeElement !== el.gamePack) el.gamePack.value = pack.id;
-  el.gamePack.disabled = !writable;
-  if (view.phase !== 'lobby') {
-    const hint = canEditSettings() ? ' Другую колоду можно выбрать в «Новой игре».' : '';
-    paintPackNote(el.packNote, pack);
-    if (hint) el.packNote.textContent = (pack.adult ? 'Только для взрослых.' : pack.note) + hint;
-    return;
-  }
-  el.packNote.textContent = pack.adult
-    ? 'Колоду выбирает создатель комнаты. Сейчас это слова 18+.'
-    : 'Колоду выбирает создатель комнаты.';
-  el.packNote.classList.toggle('is-adult', pack.adult);
-}
-
 function renderTimerSettings(view) {
   const s = view.settings || room.settings;
   const writable = canEditSettings();
@@ -967,25 +926,18 @@ function fillPackSelect(select) {
 }
 
 fillPackSelect(el.pack);
-fillPackSelect(el.gamePack);
 fillPackSelect(el.newGamePack);
 const savedPack = localStorage.getItem('cnpix:pack');
 if (savedPack) el.pack.value = getPack(savedPack).id;
 paintPackNote(el.packNoteHome, getPack(el.pack.value));
 el.pack.addEventListener('change', () => paintPackNote(el.packNoteHome, getPack(el.pack.value)));
 
-el.gamePack.addEventListener('change', () => {
-  const view = room.view;
-  if (!view || view.phase !== 'lobby' || !canEditSettings()) {
-    if (view) el.gamePack.value = view.pack || room.packId;
-    return;
-  }
-  const next = el.gamePack.value;
-  if (!confirmAdult(next)) {
-    el.gamePack.value = view.pack || room.packId;
-    return;
-  }
-  room.dispatch({ t: 'newGame', mode: view.mode || room.boardMode, pack: next });
+el.sidePanel.addEventListener('click', (e) => {
+  const toggle = e.target.closest('.panel__toggle');
+  if (!toggle) return;
+  const block = toggle.closest('.panel__block');
+  const collapsed = block.classList.toggle('is-collapsed');
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 });
 
 // Подсказка по размерам поля в меню собирается из правил, чтобы не дублировать цифры.

@@ -53,13 +53,24 @@
     </div>
 
     <div class="field">
-      <span>Бот думает</span>
-      <div class="timer-fields">
-        <label>Капитан, сек
-          <input id="home-bot-clue" type="number" min="0" max="30" step="1" value="5" inputmode="numeric">
-        </label>
-        <label>Оперативник, сек
-          <input id="home-bot-guess" type="number" min="0" max="30" step="1" value="5" inputmode="numeric">
+      <span>Бот</span>
+      <label class="switch">
+        <input id="home-bot-on" type="checkbox">
+        <span>Играть с ботом</span>
+      </label>
+      <div id="home-bot-fields" hidden>
+        <div class="timer-fields">
+          <label>Капитан, сек
+            <input id="home-bot-clue" type="number" min="0" max="30" step="1" value="5" inputmode="numeric">
+          </label>
+          <label>Оперативник, сек
+            <input id="home-bot-guess" type="number" min="0" max="30" step="1" value="5" inputmode="numeric">
+          </label>
+        </div>
+        <label class="field field--inset">
+          <span>Риск капитана <b id="home-bot-risk-value">50</b></span>
+          <input id="home-bot-risk" type="range" min="0" max="100" step="1" value="50">
+          <p class="muted small">Чем выше, тем больше карт бот собирает в одну подсказку.</p>
         </label>
       </div>
     </div>
@@ -120,99 +131,98 @@
       <div id="board-area" class="board-area">
         <div id="board" class="board"></div>
       </div>
-      <div id="clue-strip" class="clue-strip" hidden></div>
+      <div class="board-foot">
+        <div id="clue-strip" class="clue-strip" hidden></div>
+        <div class="clue-dock">
+          <form id="clue-form" class="clue-form" hidden>
+            <input id="clue-word" type="text" maxlength="40" placeholder="Слово" autocomplete="off">
+            <input id="clue-count" type="number" min="0" max="9" value="1" inputmode="numeric">
+            <button class="btn btn--primary" type="submit">Дать</button>
+          </form>
+          <p id="clue-info" class="clue-info">Ждём ход.</p>
+          <button id="btn-endturn" class="btn" hidden>Завершить ход</button>
+        </div>
+      </div>
     </div>
 
-    <aside class="panel">
-      <div class="panel__block">
-        <h2>Колода</h2>
-        <select id="game-pack"></select>
-        <p id="pack-note" class="muted small pack-note"></p>
-      </div>
-
-      <div class="panel__block">
-        <h2>Ваше место</h2>
-        <div id="seat-online" class="seat">
-          <div class="seat__row" data-group="team">
-            <button class="chip chip--red" data-team="red">Красные</button>
-            <button class="chip chip--blue" data-team="blue">Синие</button>
-            <button class="chip" data-team="none">Зритель</button>
+    <aside class="panel" id="side-panel">
+      <section class="panel__block">
+        <button type="button" class="panel__toggle" aria-expanded="true">Ваше место</button>
+        <div class="panel__body">
+          <div id="seat-online" class="seat">
+            <div class="seat__row" data-group="team">
+              <button class="chip chip--red" data-team="red">Красные</button>
+              <button class="chip chip--blue" data-team="blue">Синие</button>
+              <button class="chip" data-team="none">Зритель</button>
+            </div>
+            <div class="seat__row" data-group="role">
+              <button class="chip" data-role="operative">Оперативник</button>
+              <button class="chip" data-role="spymaster">Капитан</button>
+            </div>
           </div>
-          <div class="seat__row" data-group="role">
-            <button class="chip" data-role="operative">Оперативник</button>
-            <button class="chip" data-role="spymaster">Капитан</button>
-          </div>
-        </div>
-        <div id="seat-local" class="seat" hidden>
-          <label class="switch">
-            <input id="toggle-key" type="checkbox">
-            <span>Показать ключ капитана</span>
-          </label>
-          <p class="muted small">Передавайте устройство: ключ видно только когда переключатель включён.</p>
-        </div>
-      </div>
-
-      <div class="panel__block">
-        <h2>Подсказка</h2>
-        <form id="clue-form" class="clue-form" hidden>
-          <input id="clue-word" type="text" maxlength="40" placeholder="Слово" autocomplete="off">
-          <input id="clue-count" type="number" min="0" max="9" value="1" inputmode="numeric">
-          <button class="btn btn--primary" type="submit">Дать</button>
-        </form>
-        <p id="clue-info" class="clue-info">Ждём ход.</p>
-        <button id="btn-endturn" class="btn btn--wide" hidden>Завершить ход</button>
-      </div>
-
-      <div class="panel__block">
-        <h2>Подсказки партии</h2>
-        <ol id="clue-history" class="clue-history" hidden></ol>
-        <p id="clue-history-empty" class="muted small">Пока никто не давал подсказок.</p>
-      </div>
-
-      <div class="panel__block">
-        <h2>Таймер</h2>
-        <div id="timer-settings" class="timer-settings">
-          <label class="switch">
-            <input id="game-timer-on" type="checkbox">
-            <span>Включить</span>
-          </label>
-          <div class="timer-fields">
-            <label>Капитан, мин
-              <input id="game-timer-clue" type="number" min="0.5" max="10" step="0.1" value="3" inputmode="decimal">
+          <div id="seat-local" class="seat" hidden>
+            <label class="switch">
+              <input id="toggle-key" type="checkbox">
+              <span>Показать ключ капитана</span>
             </label>
-            <label>Угадывание, мин
-              <input id="game-timer-guess" type="number" min="0.5" max="10" step="0.1" value="1.5" inputmode="decimal">
-            </label>
+            <p class="muted small">Передавайте устройство: ключ видно только когда переключатель включён.</p>
           </div>
-          <p id="timer-hint" class="muted small">Настройки меняет создатель комнаты.</p>
-          <p class="muted small">На первой подсказке капитану, который ходит первым, добавляется 2 минуты.</p>
         </div>
-      </div>
+      </section>
 
-      <div id="block-players" class="panel__block">
-        <h2>Игроки</h2>
-        <ul id="players" class="players"></ul>
-      </div>
-
-      <div class="panel__block panel__block--grow">
-        <h2>Журнал</h2>
-        <ol id="log" class="log"></ol>
-      </div>
-
-      <div id="block-bot" class="panel__block" hidden>
-        <h2>ИИ-бот</h2>
-        <p id="bot-note" class="muted small">Ходит на этом устройстве. Для слов и классических картинок.</p>
-        <div class="seat__row">
-          <button type="button" class="chip chip--red is-active" data-bot-team="red">Красные</button>
-          <button type="button" class="chip chip--blue" data-bot-team="blue">Синие</button>
+      <section class="panel__block">
+        <button type="button" class="panel__toggle" aria-expanded="true">Подсказки партии</button>
+        <div class="panel__body">
+          <ol id="clue-history" class="clue-history" hidden></ol>
+          <p id="clue-history-empty" class="muted small">Пока никто не давал подсказок.</p>
         </div>
-        <div class="seat__row">
-          <button type="button" class="chip is-active" data-bot-role="spymaster">Капитан</button>
-          <button type="button" class="chip" data-bot-role="operative">Оперативник</button>
+      </section>
+
+      <section class="panel__block is-collapsed">
+        <button type="button" class="panel__toggle" aria-expanded="false">Таймер</button>
+        <div class="panel__body">
+          <div id="timer-settings" class="timer-settings">
+            <label class="switch">
+              <input id="game-timer-on" type="checkbox">
+              <span>Включить</span>
+            </label>
+            <div class="timer-fields">
+              <label>Капитан, мин
+                <input id="game-timer-clue" type="number" min="0.5" max="10" step="0.1" value="3" inputmode="decimal">
+              </label>
+              <label>Угадывание, мин
+                <input id="game-timer-guess" type="number" min="0.5" max="10" step="0.1" value="1.5" inputmode="decimal">
+              </label>
+            </div>
+            <p id="timer-hint" class="muted small">Настройки меняет создатель комнаты.</p>
+            <p class="muted small">На первой подсказке капитану, который ходит первым, добавляется 2 минуты.</p>
+          </div>
         </div>
-        <button id="btn-add-bot" class="btn btn--wide" type="button">Добавить бота</button>
-        <ul id="bot-list" class="bot-list"></ul>
-      </div>
+      </section>
+
+      <section id="block-players" class="panel__block">
+        <button type="button" class="panel__toggle" aria-expanded="true">Игроки</button>
+        <div class="panel__body">
+          <ul id="players" class="players"></ul>
+        </div>
+      </section>
+
+      <section id="block-bot" class="panel__block is-collapsed" hidden>
+        <button type="button" class="panel__toggle" aria-expanded="false">ИИ-бот</button>
+        <div class="panel__body">
+          <p id="bot-note" class="muted small">Ходит на этом устройстве. Для слов и классических картинок.</p>
+          <div class="seat__row">
+            <button type="button" class="chip chip--red is-active" data-bot-team="red">Красные</button>
+            <button type="button" class="chip chip--blue" data-bot-team="blue">Синие</button>
+          </div>
+          <div class="seat__row">
+            <button type="button" class="chip is-active" data-bot-role="spymaster">Капитан</button>
+            <button type="button" class="chip" data-bot-role="operative">Оперативник</button>
+          </div>
+          <button id="btn-add-bot" class="btn btn--wide" type="button">Добавить бота</button>
+          <ul id="bot-list" class="bot-list"></ul>
+        </div>
+      </section>
     </aside>
   </main>
 
